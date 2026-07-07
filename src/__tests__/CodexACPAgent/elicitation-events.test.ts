@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as acp from "@agentclientprotocol/sdk";
-import type { McpServerElicitationRequestParams } from '../../app-server/v2';
+import type { McpServerElicitationRequestParams, ToolRequestUserInputParams } from '../../app-server/v2';
 import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import type { SessionState } from '../../CodexAcpServer';
 import { AgentMode } from "../../AgentMode";
@@ -256,6 +256,235 @@ describe('Elicitation Events', () => {
 
             await fixture.sendServerRequest('mcpServer/elicitation/request', params);
             await expect(fixture.getAcpConnectionDump(['_meta'])).toMatchFileSnapshot('data/elicitation-form-accept.json');
+
+            completeTurn();
+            await promptPromise;
+        });
+    });
+
+    describe('Codex request_user_input', () => {
+        it('should map Codex questions to one ACP form elicitation', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setElicitationResponse({
+                action: 'accept',
+                content: {
+                    decision: 'Ship it',
+                    decision_note: 'after tests pass',
+                    context: 'Use the default path',
+                    closed: 'Continue',
+                },
+            });
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-request-input',
+                autoResolutionMs: null,
+                questions: [
+                    {
+                        id: 'decision',
+                        header: 'Decision',
+                        question: 'What should Codex do?',
+                        isOther: true,
+                        isSecret: true,
+                        options: [
+                            { label: 'Ship it', description: 'Continue with the implementation.' },
+                            { label: 'Stop', description: 'Do not continue.' },
+                        ],
+                    },
+                    {
+                        id: 'context',
+                        header: 'Context',
+                        question: 'Any extra context?',
+                        isOther: false,
+                        isSecret: false,
+                        options: null,
+                    },
+                    {
+                        id: 'closed',
+                        header: 'Closed choice',
+                        question: 'Pick one closed option.',
+                        isOther: false,
+                        isSecret: false,
+                        options: [{ label: 'Continue', description: '' }],
+                    },
+                ],
+            };
+
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+
+            expect(response).toEqual({
+                answers: {
+                    decision: { answers: ['Ship it', 'user_note: after tests pass'] },
+                    context: { answers: ['user_note: Use the default path'] },
+                    closed: { answers: ['Continue'] },
+                },
+            });
+            expect(fixture.getAcpConnectionEvents([])).toEqual([
+                {
+                    method: 'createElicitation',
+                    args: [
+                        {
+                            mode: 'form',
+                            sessionId,
+                            toolCallId: 'item-request-input',
+                            message: 'Codex needs your input to continue.',
+                            requestedSchema: {
+                                type: 'object',
+                                properties: {
+                                    decision: {
+                                        type: 'string',
+                                        title: 'What should Codex do?',
+                                        oneOf: [
+                                            {
+                                                const: 'Ship it',
+                                                title: 'Ship it',
+                                                description: 'Continue with the implementation.',
+                                            },
+                                            {
+                                                const: 'Stop',
+                                                title: 'Stop',
+                                                description: 'Do not continue.',
+                                            },
+                                            {
+                                                const: 'None of the above',
+                                                title: 'None of the above',
+                                                description: 'Provide a different answer in the note field.',
+                                            },
+                                        ],
+                                    },
+                                    decision_note: {
+                                        type: 'string',
+                                        title: 'Note for Decision',
+                                    },
+                                    context: {
+                                        type: 'string',
+                                        title: 'Any extra context?',
+                                    },
+                                    closed: {
+                                        type: 'string',
+                                        title: 'Pick one closed option.',
+                                        oneOf: [
+                                            { const: 'Continue', title: 'Continue' },
+                                        ],
+                                    },
+                                },
+                                required: ['decision', 'context', 'closed'],
+                            },
+                        },
+                    ],
+                },
+            ]);
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should abort request_user_input when ACP elicitation is cancelled', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setElicitationResponse({ action: 'cancel' });
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-request-input',
+                autoResolutionMs: null,
+                questions: [
+                    {
+                        id: 'decision',
+                        header: 'Decision',
+                        question: 'What should Codex do?',
+                        isOther: false,
+                        isSecret: false,
+                        options: [{ label: 'Continue', description: '' }],
+                    },
+                ],
+            };
+
+            await expect(fixture.sendServerRequest('item/tool/requestUserInput', params))
+                .rejects.toThrow('request_user_input cancelled');
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should return empty answers when ACP elicitation is declined', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setElicitationResponse({ action: 'decline' });
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-request-input',
+                autoResolutionMs: null,
+                questions: [
+                    {
+                        id: 'decision',
+                        header: 'Decision',
+                        question: 'What should Codex do?',
+                        isOther: false,
+                        isSecret: false,
+                        options: [{ label: 'Continue', description: '' }],
+                    },
+                ],
+            };
+
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+
+            expect(response).toEqual({ answers: { decision: { answers: [] } } });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it('should return empty answers when no handler is registered', async () => {
+            const params: ToolRequestUserInputParams = {
+                threadId: 'missing-session',
+                turnId: 'turn-1',
+                itemId: 'item-request-input',
+                autoResolutionMs: null,
+                questions: [
+                    {
+                        id: 'question',
+                        header: 'Question',
+                        question: 'Answer?',
+                        isOther: false,
+                        isSecret: false,
+                        options: null,
+                    },
+                ],
+            };
+
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+
+            expect(response).toEqual({ answers: { question: { answers: [] } } });
+        });
+
+        it('should return empty answers for stale turns without showing ACP elicitation', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.getCodexAppServerClient().markTurnStale(sessionId, 'turn-1');
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-request-input',
+                autoResolutionMs: null,
+                questions: [
+                    {
+                        id: 'question',
+                        header: 'Question',
+                        question: 'Answer?',
+                        isOther: false,
+                        isSecret: false,
+                        options: null,
+                    },
+                ],
+            };
+
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+
+            expect(response).toEqual({ answers: { question: { answers: [] } } });
+            expect(fixture.getAcpConnectionEvents([])).toEqual([]);
 
             completeTurn();
             await promptPromise;

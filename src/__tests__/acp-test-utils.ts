@@ -292,6 +292,7 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
         return { mock: "Mocked return" };
     });
     returnValues.set('requestPermission', () => permissionState.response);
+    returnValues.set('unstable_createElicitation', () => elicitationState.response);
 
     const acpConnection = createSmartMock<AcpClientConnection>((event) => {
         const normalizedEvent = normalizeAcpConnectionEvent(event);

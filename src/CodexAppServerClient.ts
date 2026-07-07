@@ -63,6 +63,8 @@ import type {
     PermissionsRequestApprovalParams,
     PermissionsRequestApprovalResponse,
     ItemCompletedNotification,
+    ToolRequestUserInputParams,
+    ToolRequestUserInputResponse,
 } from "./app-server/v2";
 
 export interface ApprovalHandler {
@@ -73,6 +75,7 @@ export interface ApprovalHandler {
 
 export interface ElicitationHandler {
     handleElicitation(params: McpServerElicitationRequestParams): Promise<McpServerElicitationRequestResponse>;
+    handleRequestUserInput?(params: ToolRequestUserInputParams): Promise<ToolRequestUserInputResponse>;
 }
 
 export type McpStartupFailure = {
@@ -109,6 +112,12 @@ const McpServerElicitationRequest = new RequestType<
     McpServerElicitationRequestResponse,
     void
 >('mcpServer/elicitation/request');
+
+const ToolRequestUserInputRequest = new RequestType<
+    ToolRequestUserInputParams,
+    ToolRequestUserInputResponse,
+    void
+>('item/tool/requestUserInput');
 
 const GOAL_RUNTIME_EFFECTS_GRACE_MS = 1_000;
 
@@ -216,6 +225,17 @@ export class CodexAppServerClient {
                 return { action: "cancel", content: null, _meta: null };
             }
             return await handler.handleElicitation(params);
+        });
+
+        this.connection.onRequest(ToolRequestUserInputRequest, async (params) => {
+            if (this.isStaleTurn(params.threadId, params.turnId)) {
+                return emptyUserInputResponse(params);
+            }
+            const handler = this.elicitationHandlers.get(params.threadId);
+            if (!handler?.handleRequestUserInput) {
+                return emptyUserInputResponse(params);
+            }
+            return await handler.handleRequestUserInput(params);
         });
     }
 
@@ -1011,4 +1031,12 @@ function extractTurnRouting(notification: ServerNotification): { threadId: strin
         return {threadId, turnId: params.turn.id};
     }
     return {threadId, turnId: null};
+}
+
+function emptyUserInputResponse(params: ToolRequestUserInputParams): ToolRequestUserInputResponse {
+    return {
+        answers: Object.fromEntries(
+            params.questions.map((question) => [question.id, { answers: [] }])
+        ),
+    };
 }

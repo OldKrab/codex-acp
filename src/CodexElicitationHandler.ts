@@ -8,6 +8,10 @@ import type {
     ItemStartedNotification,
     McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse,
+    ToolRequestUserInputOption,
+    ToolRequestUserInputParams,
+    ToolRequestUserInputQuestion,
+    ToolRequestUserInputResponse,
 } from "./app-server/v2";
 import { logger } from "./Logger";
 import { McpApprovalOptionId } from "./McpApprovalOptionId";
@@ -35,6 +39,16 @@ type AcpBackedMcpElicitationParams = Extract<
     McpServerElicitationRequestParams,
     { mode: "form" } | { mode: "url" }
 >;
+const OTHER_OPTION_LABEL = "None of the above";
+const USER_NOTE_PREFIX = "user_note: ";
+const REQUEST_USER_INPUT_CANCELLED_MESSAGE = "request_user_input cancelled";
+
+class RequestUserInputCancelledError extends Error {
+    constructor() {
+        super(REQUEST_USER_INPUT_CANCELLED_MESSAGE);
+        this.name = "RequestUserInputCancelledError";
+    }
+}
 
 /**
  * Parses the `persist` field from the elicitation request `_meta`.
@@ -332,6 +346,24 @@ export class CodexElicitationHandler implements ElicitationHandler {
         }
     }
 
+    async handleRequestUserInput(params: ToolRequestUserInputParams): Promise<ToolRequestUserInputResponse> {
+        try {
+            const request = buildUserInputElicitationRequest(params, this.sessionState.sessionId);
+            const response = await this.connection.request(
+                acp.methods.client.elicitation.create,
+                request,
+                this.requestOptions(),
+            );
+            return convertUserInputResponse(params, response);
+        } catch (error) {
+            if (error instanceof RequestUserInputCancelledError || this.cancellationSignal?.aborted) {
+                throw error;
+            }
+            logger.error("Error handling request_user_input", error);
+            return emptyUserInputResponse(params.questions);
+        }
+    }
+
     private requestOptions(): acp.SendRequestOptions | undefined {
         return this.cancellationSignal ? {cancellationSignal: this.cancellationSignal} : undefined;
     }
@@ -588,4 +620,146 @@ export class CodexElicitationHandler implements ElicitationHandler {
     private belongsToThread(key: string, threadId: string): boolean {
         return key.startsWith(`${threadId}:`);
     }
+}
+
+function buildUserInputElicitationRequest(
+    params: ToolRequestUserInputParams,
+    sessionId: string
+): acp.CreateElicitationRequest {
+    const properties: Record<string, acp.ElicitationPropertySchema> = {};
+    const required: string[] = [];
+
+    for (const question of params.questions) {
+        properties[question.id] = buildQuestionSchema(question);
+        required.push(question.id);
+        if (shouldIncludeNoteField(question)) {
+            properties[noteFieldId(question.id)] = {
+                type: "string",
+                title: `Note for ${questionLabel(question)}`,
+            };
+        }
+    }
+
+    return {
+        mode: "form",
+        sessionId,
+        toolCallId: params.itemId,
+        message: "Codex needs your input to continue.",
+        requestedSchema: {
+            type: "object",
+            properties,
+            required,
+        },
+    };
+}
+
+function buildQuestionSchema(question: ToolRequestUserInputQuestion): acp.ElicitationPropertySchema {
+    const title = questionTitle(question);
+    if (question.options && question.options.length > 0) {
+        const oneOf = buildOptionSchemas(question.options, question.isOther);
+        return {
+            type: "string",
+            oneOf,
+            ...(title ? { title } : {}),
+        };
+    }
+
+    return {
+        type: "string",
+        ...(title ? { title } : {}),
+    };
+}
+
+function buildOptionSchemas(
+    options: ToolRequestUserInputOption[],
+    includeOther: boolean,
+): acp.EnumOption[] {
+    const result: acp.EnumOption[] = options.map(option => ({
+        const: option.label,
+        title: option.label,
+        ...(option.description.trim().length > 0 ? { description: option.description } : {}),
+    }));
+    if (includeOther) {
+        result.push({
+            const: OTHER_OPTION_LABEL,
+            title: OTHER_OPTION_LABEL,
+            description: "Provide a different answer in the note field.",
+        });
+    }
+    return result;
+}
+
+function convertUserInputResponse(
+    params: ToolRequestUserInputParams,
+    response: acp.CreateElicitationResponse
+): ToolRequestUserInputResponse {
+    if (response.action === "cancel") {
+        throw new RequestUserInputCancelledError();
+    }
+    if (response.action === "decline") {
+        return emptyUserInputResponse(params.questions);
+    }
+
+    const responseContent = "content" in response ? response.content : null;
+    const content: Record<string, acp.ElicitationContentValue> = responseContent && typeof responseContent === "object"
+        ? responseContent as Record<string, acp.ElicitationContentValue>
+        : {};
+
+    return {
+        answers: Object.fromEntries(
+            params.questions.map(question => [question.id, {
+                answers: convertQuestionAnswer(question, content),
+            }])
+        ),
+    };
+}
+
+function convertQuestionAnswer(
+    question: ToolRequestUserInputQuestion,
+    content: Record<string, acp.ElicitationContentValue>
+): string[] {
+    const answers: string[] = [];
+    const selectedOrText = content[question.id];
+    if (typeof selectedOrText === "string" && selectedOrText.trim().length > 0) {
+        if (question.options && question.options.length > 0) {
+            answers.push(selectedOrText);
+        } else {
+            answers.push(`${USER_NOTE_PREFIX}${selectedOrText.trim()}`);
+        }
+    }
+
+    if (shouldIncludeNoteField(question)) {
+        const note = content[noteFieldId(question.id)];
+        if (typeof note === "string" && note.trim().length > 0) {
+            answers.push(`${USER_NOTE_PREFIX}${note.trim()}`);
+        }
+    }
+
+    return answers;
+}
+
+function emptyUserInputResponse(questions: ToolRequestUserInputQuestion[]): ToolRequestUserInputResponse {
+    return {
+        answers: Object.fromEntries(
+            questions.map(question => [question.id, { answers: [] }])
+        ),
+    };
+}
+
+function shouldIncludeNoteField(question: ToolRequestUserInputQuestion): boolean {
+    return question.isOther && !!question.options && question.options.length > 0;
+}
+
+function questionTitle(question: ToolRequestUserInputQuestion): string | undefined {
+    const prompt = question.question.trim();
+    const header = question.header.trim();
+    return prompt || header || undefined;
+}
+
+function questionLabel(question: ToolRequestUserInputQuestion): string {
+    return question.header.trim() || question.question.trim() || question.id;
+}
+
+function noteFieldId(questionId: string): string {
+    return `${questionId}_note`;
 }
