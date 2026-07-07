@@ -437,6 +437,129 @@ describe('Elicitation Events', () => {
             await promptPromise;
         });
 
+        it('should auto-resolve unanswered request_user_input after the requested timeout', async () => {
+            vi.useFakeTimers();
+            try {
+                const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+                fixture.setElicitationResponse(new Promise(() => {}));
+
+                const params: ToolRequestUserInputParams = {
+                    threadId: sessionId,
+                    turnId: 'turn-1',
+                    itemId: 'item-request-input',
+                    autoResolutionMs: 50,
+                    questions: [
+                        {
+                            id: 'decision',
+                            header: 'Decision',
+                            question: 'What should Codex do?',
+                            isOther: false,
+                            isSecret: false,
+                            options: [{ label: 'Continue', description: '' }],
+                        },
+                    ],
+                };
+
+                const responsePromise = fixture.sendServerRequest('item/tool/requestUserInput', params);
+                await vi.advanceTimersByTimeAsync(50);
+
+                await expect(responsePromise).resolves.toEqual({ answers: { decision: { answers: [] } } });
+
+                completeTurn();
+                await promptPromise;
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('should keep readable note fields from colliding with Codex question ids', async () => {
+            const { promptPromise, completeTurn } = setupSessionWithPendingPrompt();
+            fixture.setElicitationResponse({
+                action: 'accept',
+                content: {
+                    decision: 'Ship it',
+                    decision_note: 'after tests pass',
+                    decision_note_2: 'This is a real decision_note id',
+                    question_0: 'This is a real question_0 id',
+                },
+            });
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'item-request-input',
+                autoResolutionMs: null,
+                questions: [
+                    {
+                        id: 'decision',
+                        header: 'Decision',
+                        question: 'What should Codex do?',
+                        isOther: true,
+                        isSecret: false,
+                        options: [{ label: 'Ship it', description: '' }],
+                    },
+                    {
+                        id: 'decision_note',
+                        header: 'Follow-up',
+                        question: 'This id must not collide with the generated note field.',
+                        isOther: false,
+                        isSecret: false,
+                        options: null,
+                    },
+                    {
+                        id: 'question_0',
+                        header: 'Generated-looking id',
+                        question: 'Readable ids should still allow this real question id.',
+                        isOther: false,
+                        isSecret: false,
+                        options: null,
+                    },
+                ],
+            };
+
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+
+            expect(response).toEqual({
+                answers: {
+                    decision: { answers: ['Ship it', 'user_note: after tests pass'] },
+                    decision_note: { answers: ['user_note: This is a real decision_note id'] },
+                    question_0: { answers: ['user_note: This is a real question_0 id'] },
+                },
+            });
+            const elicitationEvent = fixture.getAcpConnectionEvents([])
+                .find(event => event.method === 'createElicitation');
+            expect(elicitationEvent?.args[0].requestedSchema.properties).toEqual({
+                decision: {
+                    type: 'string',
+                    title: 'What should Codex do?',
+                    oneOf: [
+                        { const: 'Ship it', title: 'Ship it' },
+                        {
+                            const: 'None of the above',
+                            title: 'None of the above',
+                            description: 'Provide a different answer in the note field.',
+                        },
+                    ],
+                },
+                decision_note: {
+                    type: 'string',
+                    title: 'Note for Decision',
+                },
+                decision_note_2: {
+                    type: 'string',
+                    title: 'This id must not collide with the generated note field.',
+                },
+                question_0: {
+                    type: 'string',
+                    title: 'Readable ids should still allow this real question id.',
+                },
+            });
+            expect(elicitationEvent?.args[0].requestedSchema.required).toEqual(['decision', 'decision_note_2', 'question_0']);
+
+            completeTurn();
+            await promptPromise;
+        });
+
         it('should return empty answers when no handler is registered', async () => {
             const params: ToolRequestUserInputParams = {
                 threadId: 'missing-session',

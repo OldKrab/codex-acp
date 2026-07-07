@@ -42,6 +42,7 @@ type AcpBackedMcpElicitationParams = Extract<
 const OTHER_OPTION_LABEL = "None of the above";
 const USER_NOTE_PREFIX = "user_note: ";
 const REQUEST_USER_INPUT_CANCELLED_MESSAGE = "request_user_input cancelled";
+const AUTO_RESOLUTION_TIMEOUT = Symbol("request_user_input_auto_resolution_timeout");
 
 class RequestUserInputCancelledError extends Error {
     constructor() {
@@ -348,13 +349,15 @@ export class CodexElicitationHandler implements ElicitationHandler {
 
     async handleRequestUserInput(params: ToolRequestUserInputParams): Promise<ToolRequestUserInputResponse> {
         try {
-            const request = buildUserInputElicitationRequest(params, this.sessionState.sessionId);
-            const response = await this.connection.request(
-                acp.methods.client.elicitation.create,
-                request,
-                this.requestOptions(),
-            );
-            return convertUserInputResponse(params, response);
+            const elicitation = buildUserInputElicitationRequest(params, this.sessionState.sessionId);
+            const response = params.autoResolutionMs === null
+                ? await this.connection.request(
+                    acp.methods.client.elicitation.create,
+                    elicitation.request,
+                    this.requestOptions(),
+                )
+                : await this.requestUserInputWithAutoResolution(params, elicitation.request);
+            return convertUserInputResponse(elicitation.fields, response);
         } catch (error) {
             if (error instanceof RequestUserInputCancelledError || this.cancellationSignal?.aborted) {
                 throw error;
@@ -366,6 +369,56 @@ export class CodexElicitationHandler implements ElicitationHandler {
 
     private requestOptions(): acp.SendRequestOptions | undefined {
         return this.cancellationSignal ? {cancellationSignal: this.cancellationSignal} : undefined;
+    }
+
+    private async requestUserInputWithAutoResolution(
+        params: ToolRequestUserInputParams,
+        request: acp.CreateElicitationRequest,
+    ): Promise<acp.CreateElicitationResponse> {
+        const abortController = new AbortController();
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        let removeParentAbortListener: (() => void) | undefined;
+
+        const timeoutPromise = new Promise<typeof AUTO_RESOLUTION_TIMEOUT>((resolve) => {
+            timeoutId = setTimeout(() => resolve(AUTO_RESOLUTION_TIMEOUT), params.autoResolutionMs!);
+        });
+        const parentAbortPromise = new Promise<never>((_, reject) => {
+            if (!this.cancellationSignal) {
+                return;
+            }
+            const abort = () => {
+                abortController.abort(this.cancellationSignal?.reason);
+                reject(this.cancellationSignal?.reason ?? new RequestUserInputCancelledError());
+            };
+            if (this.cancellationSignal.aborted) {
+                abort();
+                return;
+            }
+            this.cancellationSignal.addEventListener("abort", abort, { once: true });
+            removeParentAbortListener = () => this.cancellationSignal?.removeEventListener("abort", abort);
+        });
+
+        try {
+            const response = await Promise.race([
+                this.connection.request(
+                    acp.methods.client.elicitation.create,
+                    request,
+                    { cancellationSignal: abortController.signal },
+                ),
+                timeoutPromise,
+                parentAbortPromise,
+            ]);
+            if (response === AUTO_RESOLUTION_TIMEOUT) {
+                abortController.abort();
+                return { action: "decline" };
+            }
+            return response;
+        } finally {
+            if (timeoutId !== undefined) {
+                clearTimeout(timeoutId);
+            }
+            removeParentAbortListener?.();
+        }
     }
 
     private createMcpElicitationContext(params: McpServerElicitationRequestParams): McpElicitationContext {
@@ -625,15 +678,27 @@ export class CodexElicitationHandler implements ElicitationHandler {
 function buildUserInputElicitationRequest(
     params: ToolRequestUserInputParams,
     sessionId: string
-): acp.CreateElicitationRequest {
+): { request: acp.CreateElicitationRequest; fields: UserInputQuestionField[] } {
     const properties: Record<string, acp.ElicitationPropertySchema> = {};
     const required: string[] = [];
+    const fields: UserInputQuestionField[] = [];
+    const fieldIds = new ElicitationFieldIds();
 
     for (const question of params.questions) {
-        properties[question.id] = buildQuestionSchema(question);
-        required.push(question.id);
-        if (shouldIncludeNoteField(question)) {
-            properties[noteFieldId(question.id)] = {
+        const answerFieldId = fieldIds.claim(question.id);
+        const noteFieldId = shouldIncludeNoteField(question)
+            ? fieldIds.claim(`${answerFieldId}_note`)
+            : undefined;
+        const field: UserInputQuestionField = {
+            question,
+            answerFieldId,
+            ...(noteFieldId ? { noteFieldId } : {}),
+        };
+        fields.push(field);
+        properties[answerFieldId] = buildQuestionSchema(question);
+        required.push(answerFieldId);
+        if (field.noteFieldId) {
+            properties[field.noteFieldId] = {
                 type: "string",
                 title: `Note for ${questionLabel(question)}`,
             };
@@ -641,15 +706,18 @@ function buildUserInputElicitationRequest(
     }
 
     return {
-        mode: "form",
-        sessionId,
-        toolCallId: params.itemId,
-        message: "Codex needs your input to continue.",
-        requestedSchema: {
-            type: "object",
-            properties,
-            required,
+        request: {
+            mode: "form",
+            sessionId,
+            toolCallId: params.itemId,
+            message: "Codex needs your input to continue.",
+            requestedSchema: {
+                type: "object",
+                properties,
+                required,
+            },
         },
+        fields,
     };
 }
 
@@ -689,15 +757,23 @@ function buildOptionSchemas(
     return result;
 }
 
+type UserInputQuestionField = {
+    // ACP form field IDs prefer Codex question IDs, then add a suffix only when a
+    // synthetic field or another question already claimed that readable name.
+    question: ToolRequestUserInputQuestion,
+    answerFieldId: string,
+    noteFieldId?: string,
+};
+
 function convertUserInputResponse(
-    params: ToolRequestUserInputParams,
+    fields: UserInputQuestionField[],
     response: acp.CreateElicitationResponse
 ): ToolRequestUserInputResponse {
     if (response.action === "cancel") {
         throw new RequestUserInputCancelledError();
     }
     if (response.action === "decline") {
-        return emptyUserInputResponse(params.questions);
+        return emptyUserInputResponse(fields.map(field => field.question));
     }
 
     const responseContent = "content" in response ? response.content : null;
@@ -707,29 +783,29 @@ function convertUserInputResponse(
 
     return {
         answers: Object.fromEntries(
-            params.questions.map(question => [question.id, {
-                answers: convertQuestionAnswer(question, content),
+            fields.map(field => [field.question.id, {
+                answers: convertQuestionAnswer(field, content),
             }])
         ),
     };
 }
 
 function convertQuestionAnswer(
-    question: ToolRequestUserInputQuestion,
+    field: UserInputQuestionField,
     content: Record<string, acp.ElicitationContentValue>
 ): string[] {
     const answers: string[] = [];
-    const selectedOrText = content[question.id];
+    const selectedOrText = content[field.answerFieldId];
     if (typeof selectedOrText === "string" && selectedOrText.trim().length > 0) {
-        if (question.options && question.options.length > 0) {
+        if (field.question.options && field.question.options.length > 0) {
             answers.push(selectedOrText);
         } else {
             answers.push(`${USER_NOTE_PREFIX}${selectedOrText.trim()}`);
         }
     }
 
-    if (shouldIncludeNoteField(question)) {
-        const note = content[noteFieldId(question.id)];
+    if (field.noteFieldId) {
+        const note = content[field.noteFieldId];
         if (typeof note === "string" && note.trim().length > 0) {
             answers.push(`${USER_NOTE_PREFIX}${note.trim()}`);
         }
@@ -760,6 +836,23 @@ function questionLabel(question: ToolRequestUserInputQuestion): string {
     return question.header.trim() || question.question.trim() || question.id;
 }
 
-function noteFieldId(questionId: string): string {
-    return `${questionId}_note`;
+class ElicitationFieldIds {
+    private readonly used = new Set<string>();
+
+    claim(preferredId: string): string {
+        const baseId = this.sanitize(preferredId);
+        let candidate = baseId;
+        let suffix = 2;
+        while (this.used.has(candidate)) {
+            candidate = `${baseId}_${suffix}`;
+            suffix += 1;
+        }
+        this.used.add(candidate);
+        return candidate;
+    }
+
+    private sanitize(id: string): string {
+        const sanitized = id.trim().replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+        return sanitized || "question";
+    }
 }
