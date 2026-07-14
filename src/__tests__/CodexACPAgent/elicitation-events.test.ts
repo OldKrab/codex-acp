@@ -756,7 +756,7 @@ describe('Elicitation Events', () => {
                                     },
                                 ],
                                 _meta: {
-                                    codex: { questionId: 'next_step', isOther: true, isSecret: false },
+                                    codex: { isOther: true, isSecret: false },
                                 },
                             },
                             next_step_note: {
@@ -771,7 +771,7 @@ describe('Elicitation Events', () => {
                                 title: 'Any extra instructions?',
                                 description: 'Notes',
                                 _meta: {
-                                    codex: { questionId: 'notes', isOther: false, isSecret: false },
+                                    codex: { isOther: false, isSecret: false },
                                 },
                             },
                         },
