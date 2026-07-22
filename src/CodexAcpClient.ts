@@ -892,6 +892,7 @@ export class CodexAcpClient {
             cursor: request.cursor ?? null,
             modelProviders: modelProviders,
             sourceKinds: sourceKinds,
+            cwd: requestedCwd,
         });
 
         const mapThreadToSession = (thread: Thread) => ({
