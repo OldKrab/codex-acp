@@ -47,10 +47,9 @@ jobs:
         with:
           token: ${{ steps.generate-token.outputs.token }}
           # Do not add release-type here. The action ignores config-file whenever
-          # release-type is set, which would silently drop
-          # include-component-in-tag and start tagging codex-acp-vX.Y.Z instead of
-          # vX.Y.Z. The node release type is declared in that config instead, so
-          # nothing is lost by leaving this out.
+          # release-type is set, which would silently drop the component tag used
+          # to keep OpenAIDE releases distinct from inherited upstream tags. The
+          # node release type is declared in that config instead.
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
     outputs:

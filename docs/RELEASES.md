@@ -6,7 +6,7 @@ to `main` re-computes the next version from the conventional commit messages and
 keeps a single release PR open, titled `chore(main): release X.Y.Z` and labelled
 `autorelease: pending`.
 
-Merging that PR is what releases. It tags `vX.Y.Z`, creates the GitHub release,
+Merging that PR is what releases. It tags `openaide-codex-acp-vX.Y.Z`, creates the GitHub release,
 runs the verification suite, publishes to npm, and dispatches a version update to
 the agent registry.
 
@@ -40,7 +40,7 @@ e2e suite against the release commit, and nothing is published unless it passes.
 Once the workflow finishes, confirm both outputs landed:
 
 ```sh
-gh release view "v<version>"
+gh release view "openaide-codex-acp-v<version>"
 npm view "@openaide/codex-acp@<version>"
 ```
 
@@ -90,13 +90,11 @@ Note that `config-file` only takes effect while the workflow does **not** pass a
 `release-type` input to the action — with `release-type` set, the action ignores
 the config entirely. The release type is declared inside the config instead.
 
-Because the config is what is read, it also has to say
-`"include-component-in-tag": false`. Left at its default, release-please derives a
-component from the package name and tags `codex-acp-vX.Y.Z` instead of `vX.Y.Z`.
-That renames the tag every step here looks up, and because no tag under the new
-scheme exists, it also walks the entire commit history into the changelog rather
-than just what landed since the last release. The preflight checks the tag
-release-please is going to use, so this cannot reach a published release.
+The config deliberately enables `include-component-in-tag` and uses the explicit
+`openaide-codex-acp` component. The fork inherits upstream `vX.Y.Z` tags, so
+OpenAIDE releases use the distinct `openaide-codex-acp-vX.Y.Z` namespace. The
+manifest starts at `1.0.0`; release-please then advances the independent OpenAIDE
+version from its own commit history.
 
 If a specific version has to be forced, add `"release-as": "X.Y.Z"` to
 `release-please-config.json` in its own PR, release, then remove it again.
@@ -114,7 +112,7 @@ the missing release, then move the label the way release-please would have:
 
 ```sh
 awk '/^## \[<version>\]/{f=1;print;next} /^## \[/{f=0} f' CHANGELOG.md > notes.md
-gh release create "v<version>" --target <merge-commit-sha> --notes-file notes.md
+gh release create "openaide-codex-acp-v<version>" --target <merge-commit-sha> --notes-file notes.md
 gh pr edit <pr-number> --remove-label "autorelease: pending" \
   --add-label "autorelease: tagged"
 ```
@@ -127,7 +125,7 @@ npm publishes through OIDC from inside the workflow, so this cannot be done from
 a laptop. Re-run the publish workflow against the existing tag:
 
 ```sh
-gh workflow run publish.yml -f ref="v<version>" -f publish_npm=true
+gh workflow run publish.yml -f ref="openaide-codex-acp-v<version>" -f publish_npm=true
 ```
 
 This re-runs `verify` against that ref before publishing, so a flaky e2e run will

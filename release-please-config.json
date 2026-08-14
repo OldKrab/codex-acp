@@ -1,10 +1,11 @@
 {
-  "include-component-in-tag": false,
+  "include-component-in-tag": true,
   "packages": {
     ".": {
+      "component": "openaide-codex-acp",
       "changelog-path": "CHANGELOG.md",
       "release-type": "node",
-      "include-component-in-tag": false
+      "include-component-in-tag": true
     }
   },
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
