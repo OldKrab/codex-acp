@@ -58,11 +58,10 @@ jobs:
 
   # The gate for both paths: nothing is published unless this passes. Its `if`
   # rather than `needs` alone decides whether a release is happening, because on
-  # workflow_dispatch the release-please job is skipped.
+  # workflow_dispatch the release-please job is skipped. Live E2E tests are kept
+  # as a separate manually triggered workflow because they require a live API key;
+  # the publish gate remains deterministic and does not require that key.
   #
-  # Deliberately not in the `release` environment: OPENAI_API_KEY is a repository
-  # secret, so this needs nothing from it, and staying out keeps the job off the
-  # environment's deployment branch policy.
   verify:
     needs: [release-please]
     if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.publish_npm) || needs.release-please.outputs.release_created == 'true') }}
@@ -87,10 +86,6 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - name: Run e2e tests
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: npm run test:e2e
 
   publish-npm:
     name: Publish to npm
