@@ -134,22 +134,24 @@ export interface SessionState {
 }
 
 export type SessionFailureCategory =
-    | "transport_lost" | "auth_required" | "rate_limited" | "quota_exhausted" | "overloaded"
-    | "context_exhausted" | "budget_exhausted" | "policy_denied" | "bad_request"
-    | "provider_error" | "internal_error";
+    | "connection" | "access" | "limit" | "request" | "service" | "unknown";
 
-export type SessionFailureAction = "retry" | "reconnect" | "login" | "new_turn" | "new_session";
+export type SessionFailureAction = "retry" | "login" | "new_session";
+
+/**
+ * How loudly the client should render the record. Absent on the wire means `error`, so an AIR build
+ * that predates warning support keeps treating every record it receives as a failure.
+ */
+export type SessionFailureSeverity = "error" | "warning";
 
 export interface SessionFailure {
     id: string;
     revision: number;
-    phase: "active" | "cleared";
     category: SessionFailureCategory;
-    source: "codex";
-    safeMessage: string;
-    retryable: boolean;
+    severity: SessionFailureSeverity;
+    title: string;
+    details?: string;
     actions: SessionFailureAction[];
-    turnId?: string;
 }
 
 const CODEX_PROCESS_EXITED_ERROR_CODE = 1001;
@@ -2044,9 +2046,10 @@ export class CodexAcpServer {
         let eventHandler: CodexEventHandler | null = null;
         let promptNotificationsActive = true;
         const clearRecoveredSessionFailure = async (handler: CodexEventHandler): Promise<void> => {
+            await handler.completeSuccessfulTurn(sessionState.currentTurnId);
             const current = sessionState.sessionFailure;
-            if (recoverableSessionFailure?.phase === "active"
-                && current?.phase === "active"
+            if (recoverableSessionFailure !== undefined
+                && current !== undefined
                 && current.id === recoverableSessionFailure.id
                 && current.revision === recoverableSessionFailure.revision) {
                 await handler.clearSessionFailure();
@@ -2372,8 +2375,10 @@ export class CodexAcpServer {
             if (eventHandler !== null
                 && clientSupportsTypedSessionFailures(this.clientCapabilities)
                 && (isProcessExit || isUnexpectedFailure)) {
-                const category: SessionFailureCategory = isProcessExit ? "transport_lost" : "internal_error";
-                eventHandler.recordSyntheticTerminalFailure(category, sessionState.currentTurnId);
+                eventHandler.recordSyntheticTerminalFailure(
+                    isProcessExit ? "transport_lost" : "internal_error",
+                    sessionState.currentTurnId,
+                );
                 const failureResponse = this.terminalFailurePromptResponse(
                     sessionState,
                     eventHandler,
