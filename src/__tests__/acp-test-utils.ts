@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk";
-import type {McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk";
+import type {CreateElicitationResponse, McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk";
 import {CodexAcpClient} from '../CodexAcpClient';
 import {CodexAppServerClient, type CodexConnectionEvent} from '../CodexAppServerClient';
 import {startCodexConnection} from "../CodexJsonRpcConnection";
@@ -11,6 +11,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import {AgentMode} from "../AgentMode";
+import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 
@@ -41,6 +42,12 @@ export function createSmartMock<T extends object>(
 function normalizeAcpConnectionEvent(event: MethodCallEvent): MethodCallEvent {
     if (event.method === "request" && event.args[0] === acp.methods.client.session.requestPermission) {
         return {method: "requestPermission", args: [event.args[1]]};
+    }
+    if (event.method === "request" && event.args[0] === acp.methods.client.elicitation.create) {
+        return {method: "createElicitation", args: [event.args[1]]};
+    }
+    if (event.method === "notify" && event.args[0] === acp.methods.client.elicitation.complete) {
+        return {method: "completeElicitation", args: [event.args[1]]};
     }
     if (event.method === "notify" && event.args[0] === acp.methods.client.session.update) {
         return {method: "sessionUpdate", args: [event.args[1]]};
@@ -237,7 +244,8 @@ export function removeDirectoryWithRetry(directory: string): void {
 export interface CodexMockTestFixture extends TestFixture {
     sendServerNotification(notification: ServerNotification | Record<string, unknown>): void,
     sendServerRequest<T>(method: string, params: unknown): Promise<T>,
-    setPermissionResponse(response: RequestPermissionResponse): void,
+    setPermissionResponse(response: RequestPermissionResponse | Promise<RequestPermissionResponse>): void,
+    setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void,
 }
 
 /**
@@ -252,8 +260,11 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
     const requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
 
     // State for controlling permission responses
-    const permissionState: { response: RequestPermissionResponse } = {
+    const permissionState: { response: RequestPermissionResponse | Promise<RequestPermissionResponse> } = {
         response: { outcome: { outcome: 'cancelled' } }
+    };
+    const elicitationState: { response: CreateElicitationResponse | Promise<CreateElicitationResponse> } = {
+        response: { action: 'cancel' }
     };
 
     const mockCodexConnection = {
@@ -275,6 +286,9 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
     returnValues.set('request', (args) => {
         if (args[0] === acp.methods.client.session.requestPermission) {
             return permissionState.response;
+        }
+        if (args[0] === acp.methods.client.elicitation.create) {
+            return elicitationState.response;
         }
         return { mock: "Mocked return" };
     });
@@ -310,8 +324,11 @@ export function createCodexMockTestFixture(): CodexMockTestFixture {
             }
             return await handler(params) as T;
         },
-        setPermissionResponse(response: RequestPermissionResponse): void {
+        setPermissionResponse(response: RequestPermissionResponse | Promise<RequestPermissionResponse>): void {
             permissionState.response = response;
+        },
+        setElicitationResponse(response: CreateElicitationResponse | Promise<CreateElicitationResponse>): void {
+            elicitationState.response = response;
         },
     };
 }
@@ -367,9 +384,13 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         supportedReasoningEfforts: [],
         supportedInputModalities: ["text", "image"],
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
+        collaborationMode: DEFAULT_COLLABORATION_MODE,
         fastModeEnabled: false,
         currentModelSupportsFast: false,
         terminalOutputMode: "terminal_output_delta",
+        goalRevision: 0,
+        sessionTitle: null,
+        sessionTitleSource: "unknown",
         ...overrides,
     };
 }
@@ -383,6 +404,7 @@ export function createTestModel(overrides?: Partial<Model>): Model {
         upgrade: null,
         upgradeInfo: null,
         availabilityNux: null,
+        modelSpecialty: null,
         displayName: id,
         description: `${id} model`,
         hidden: false,

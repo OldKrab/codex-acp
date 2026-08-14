@@ -6,6 +6,7 @@ import { stripShellPrefix } from "./CommandUtils";
 import type { CommandAction, Thread, ThreadItem } from "./app-server/v2";
 import { createCommandActionEvent } from "./CodexToolCallMapper";
 import { createTerminalOutputMeta, type TerminalOutputMode } from "./TerminalOutputMode";
+import { createAgentMessageChunk, createCodexMessagePhaseMeta } from "./ContentChunks";
 
 type JsonRecord = Record<string, unknown>;
 type AcpToolCallEvent = Extract<UpdateSessionEvent, { sessionUpdate: "tool_call" }>;
@@ -174,6 +175,7 @@ function toolCallIdFromThreadItem(item: ThreadItem): string | null {
         case "webSearch":
         case "imageView":
         case "imageGeneration":
+        case "contextCompaction":
             return item.id;
         case "userMessage":
         case "hookPrompt":
@@ -183,7 +185,6 @@ function toolCallIdFromThreadItem(item: ThreadItem): string | null {
         case "subAgentActivity":
         case "enteredReviewMode":
         case "exitedReviewMode":
-        case "contextCompaction":
         case "sleep":
             return null;
     }
@@ -234,10 +235,10 @@ function createMessageUpdates(item: JsonRecord): UpdateSessionEvent[] {
         return [];
     }
 
-    return contentBlocksFromResponseContent(item["content"]).map((content) => ({
-        sessionUpdate: "agent_message_chunk",
-        content,
-    }));
+    const phase = stringValue(item["phase"]);
+    return contentBlocksFromResponseContent(item["content"]).map((content) => (
+        createAgentMessageChunk(content, undefined, createCodexMessagePhaseMeta(phase))
+    ));
 }
 
 function createEventMsgUpdates(record: JsonRecord): UpdateSessionEvent[] | null {

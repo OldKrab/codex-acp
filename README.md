@@ -1,6 +1,6 @@
 # ACP adapter for Codex CLI
 
-[![npm version](https://img.shields.io/npm/v/%40agentclientprotocol%2Fcodex-acp)](https://www.npmjs.com/package/@agentclientprotocol/codex-acp)
+[![npm version](https://img.shields.io/npm/v/%40openaide%2Fcodex-acp)](https://www.npmjs.com/package/@openaide/codex-acp)
 
 Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol](https://agentclientprotocol.com/) clients.
 
@@ -12,28 +12,30 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Model, reasoning effort, fast mode, approval, and sandbox mode configuration.
 - Text prompts, embedded context, images, resource links, and additional workspace directories.
 - Shell command, file change, permission request, MCP tool call, terminal output, reasoning, plan, web search, image generation, image view, token usage, and review events.
+- Subagent launches as standard ACP tool calls, with Codex thread identity and activity details in namespaced `_meta.codex.subagent` metadata.
+- Session-scoped long-running goals through the provider-neutral [goal extension](docs/goal-extension.md).
 - Client-provided MCP servers over command-based stdio config and HTTP transport.
-- Slash commands: `/status`, `/mcp`, `/skills`, `/review`, `/review-branch`, `/review-commit`, `/compact`, and `/logout`, as well as configured skills.
+- Slash commands: `/status`, `/mcp`, `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, and `/logout`, as well as configured skills.
 
 ## Installation
 
 Run the published package directly:
 
 ```bash
-npx -y @agentclientprotocol/codex-acp
+npx -y @openaide/codex-acp
 ```
 
 Or install it globally:
 
 ```bash
-npm install -g @agentclientprotocol/codex-acp
+npm install -g @openaide/codex-acp
 codex-acp --version
 ```
 
 The npm package includes a compatible `@openai/codex` dependency. Set `CODEX_PATH` only when you want the adapter to run a different Codex binary:
 
 ```bash
-CODEX_PATH=/path/to/codex npx -y @agentclientprotocol/codex-acp
+CODEX_PATH=/path/to/codex npx -y @openaide/codex-acp
 ```
 
 ## Authentication

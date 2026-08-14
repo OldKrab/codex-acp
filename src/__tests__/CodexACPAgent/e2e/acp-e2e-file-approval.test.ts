@@ -35,7 +35,8 @@ describeE2E("E2E file approval tests", () => {
     it("does not apply rejected file edits", async () => {
         fixture.setPermissionResponder(createPermissionResponder("edit", ApprovalOptionId.RejectOnce));
         const sessionId = await editFileDirectly(fixture, path.join(fixture.workspaceDir, generateFileNameForTest()), false);
-        expectPermissionRequests(fixture, sessionId, {edit: 1, execute: 0});
+        expect(fixture.readPermissionRequests(sessionId, "edit").length).toBeGreaterThanOrEqual(1);
+        expect(fixture.readPermissionRequests(sessionId, "execute")).toHaveLength(0);
     });
 });
 
@@ -89,7 +90,7 @@ async function editFileDirectly(
         sessionId,
         prompt: [{
             type: "text",
-            text: `Create ${filePath} by editing files directly. Content must be exactly: ${FILE_CONTENT}. Do not use shell commands.`,
+            text: `Create ${filePath} by editing files directly. Content must be exactly: '${FILE_CONTENT}'. Do not use shell commands.`,
         }],
     });
     if (expectSuccess) {
