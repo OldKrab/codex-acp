@@ -44,9 +44,9 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p examples/tsconfig.json",
     "codex-test": "tsx .claude/skills/run-codex/scripts/run-codex-test.ts"
   },
-  "homepage": "https://github.com/agentclientprotocol/codex-acp#readme",
+  "homepage": "https://github.com/OldKrab/codex-acp#readme",
   "bugs": {
-    "url": "https://github.com/agentclientprotocol/codex-acp/issues"
+    "url": "https://github.com/OldKrab/codex-acp/issues"
   },
   "repository": {
     "type": "git",
