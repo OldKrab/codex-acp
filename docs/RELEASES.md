@@ -46,6 +46,19 @@ npm view "@openaide/codex-acp@<version>"
 
 ## How the version is chosen
 
+The OpenAIDE package uses its own stable semantic version independent of the
+upstream adapter. The `openaideUpstream` package field and each release commit
+record the upstream tag used for that release.
+
+- `1.0.0` is the first OpenAIDE-owned production release.
+- Compatible upstream syncs and bug fixes increment the patch number.
+- New compatible adapter features increment the minor number.
+- Breaking adapter changes increment the major number.
+
+An upstream version update does not by itself determine the OpenAIDE package
+version; it is evaluated under this policy and recorded as the release's
+upstream base.
+
 Squash merges use the PR title as the commit subject, so the PR title decides the
 next version. [`conventional-prs.yml`](../.github/workflows/conventional-prs.yml)
 rejects titles release-please would not understand.
