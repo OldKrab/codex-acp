@@ -1,6 +1,6 @@
 # ACP adapter for Codex CLI
 
-[![npm version](https://img.shields.io/npm/v/%40agentclientprotocol%2Fcodex-acp)](https://www.npmjs.com/package/@agentclientprotocol/codex-acp)
+[![npm version](https://img.shields.io/npm/v/%40openaide%2Fcodex-acp)](https://www.npmjs.com/package/@openaide/codex-acp)
 
 Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol](https://agentclientprotocol.com/) clients.
 
@@ -22,20 +22,20 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 Run the published package directly:
 
 ```bash
-npx -y @agentclientprotocol/codex-acp
+npx -y @openaide/codex-acp
 ```
 
 Or install it globally:
 
 ```bash
-npm install -g @agentclientprotocol/codex-acp
+npm install -g @openaide/codex-acp
 codex-acp --version
 ```
 
 The npm package includes a compatible `@openai/codex` dependency. Set `CODEX_PATH` only when you want the adapter to run a different Codex binary:
 
 ```bash
-CODEX_PATH=/path/to/codex npx -y @agentclientprotocol/codex-acp
+CODEX_PATH=/path/to/codex npx -y @openaide/codex-acp
 ```
 
 ## Authentication

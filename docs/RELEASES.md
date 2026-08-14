@@ -41,7 +41,7 @@ Once the workflow finishes, confirm both outputs landed:
 
 ```sh
 gh release view "v<version>"
-npm view "@agentclientprotocol/codex-acp@<version>"
+npm view "@openaide/codex-acp@<version>"
 ```
 
 ## How the version is chosen

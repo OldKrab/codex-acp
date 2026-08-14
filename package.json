@@ -1,9 +1,9 @@
 {
-  "name": "@agentclientprotocol/codex-acp",
+  "name": "@openaide/codex-acp",
   "publishConfig": {
     "access": "public"
   },
-  "version": "1.3.0",
+  "version": "1.3.0-openaide.1",
   "description": "",
   "main": "dist/index.js",
   "bin": {
@@ -49,7 +49,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/agentclientprotocol/codex-acp.git"
+    "url": "git+https://github.com/OldKrab/codex-acp.git"
   },
   "keywords": [],
   "author": "Agent Client Protocol",

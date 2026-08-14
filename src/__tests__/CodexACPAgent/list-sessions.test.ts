@@ -202,7 +202,7 @@ describe("CodexACPAgent - list sessions", () => {
         );
     });
 
-    it("normalizes Windows cwd filters before comparing absolute paths", async () => {
+    it("forwards Windows cwd filters to the App Server", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
@@ -243,10 +243,14 @@ describe("CodexACPAgent - list sessions", () => {
             cwd: "D:\\workspace\\other-project",
         };
 
-        codexAppServerClient.threadList = vi.fn().mockResolvedValue({
-            data: [matchingThread, otherThread],
+        codexAppServerClient.threadList = vi.fn().mockImplementation(async (params) => ({
+            data: params.cwd === "d:/workspace/sample-project"
+                ? [matchingThread]
+                : params.cwd === "sample-project"
+                    ? [matchingThread]
+                    : [matchingThread, otherThread],
             nextCursor: null,
-        });
+        }));
 
         const response = await codexAcpAgent.listSessions({
             cwd: "d:/workspace/sample-project",
@@ -259,6 +263,9 @@ describe("CodexACPAgent - list sessions", () => {
             title: "Windows session",
             updatedAt: "1970-01-01T00:03:20.000Z",
         }]);
+        expect(codexAppServerClient.threadList).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            cwd: "d:/workspace/sample-project",
+        }));
 
         const basenameResponse = await codexAcpAgent.listSessions({
             cwd: "sample-project",
@@ -266,6 +273,9 @@ describe("CodexACPAgent - list sessions", () => {
         });
 
         expect(basenameResponse.sessions.map(session => session.sessionId)).toEqual(["sess-win"]);
+        expect(codexAppServerClient.threadList).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            cwd: "sample-project",
+        }));
     });
 
     it("should prefer the explicit thread name as the session title", async () => {
@@ -417,6 +427,8 @@ function createThread(id: string, cwd: string): Thread {
         path: null,
         cwd,
         cliVersion: "0.0.0",
+        section: null,
+        sectionEnteredAt: null,
         source: "cli",
         agentNickname: null,
         agentRole: null,
