@@ -100,7 +100,7 @@ jobs:
     environment: release # Optional: for enhanced security
     permissions:
       contents: read
-      id-token: write # npm trusted publishing, so there is no npm token
+      id-token: write # npm trusted publishing after the bootstrap release
     steps:
       - uses: actions/checkout@v7
         with:
@@ -111,8 +111,12 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
       - run: npm ci
-      # prepublishOnly builds the bundle.
+      # The bootstrap release uses NPM_TOKEN. After the package exists, configure
+      # npm Trusted Publishing for this workflow and remove the secret; OIDC then
+      # authenticates later releases without a long-lived publish token.
       - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   trigger-registry-update:
     needs: publish-npm

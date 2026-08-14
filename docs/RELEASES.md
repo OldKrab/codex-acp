@@ -13,6 +13,12 @@ the agent registry.
 There is no manual release button, and versions are never typed in by hand: the
 version is an output of the commit history, not an input.
 
+The first `1.0.0` publish bootstraps the package with the repository's encrypted
+`NPM_TOKEN` secret. After that package exists, configure npm Trusted Publishing
+for `OldKrab/codex-acp`, workflow `publish.yml`, environment `release`, and allow
+`npm publish`. Later releases authenticate through GitHub Actions OIDC; remove
+`NPM_TOKEN` after the trusted publisher succeeds.
+
 ## Releasing
 
 ```sh
