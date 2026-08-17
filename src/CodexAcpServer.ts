@@ -7,11 +7,14 @@ import {type CodexAuthRequest, getCodexAuthMethods, isCodexAuthRequest} from "./
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
 import {
     CodexAcpClient,
+    type JsonObject,
+    OPENAI_PROVIDER_ID,
     type SessionMetadata,
     type SessionMetadataWithThread,
     type UrlElicitationRequester
 } from "./CodexAcpClient";
-import type {McpStartupResult} from "./CodexAppServerClient";
+import {CodexAppServerClient, type McpStartupResult} from "./CodexAppServerClient";
+import {type CodexConnection, startCodexConnection} from "./CodexJsonRpcConnection";
 import {type AcpClientConnection, ACPSessionConnection, type UpdateSessionEvent} from "./ACPSessionConnection";
 import type {InputModality, ReasoningEffort} from "./app-server";
 import type {Account, Model, ReasoningEffortOption, Thread, ThreadGoal, ThreadItem, UserInput} from "./app-server/v2";
@@ -92,6 +95,7 @@ import {
 } from "./ContentChunks";
 import {sameThreadGoalSnapshot, type ThreadGoalSnapshot, toThreadGoalSnapshot,} from "./ThreadGoalSnapshot";
 import {randomUUID} from "node:crypto";
+import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
@@ -130,6 +134,7 @@ export interface SessionState {
     authProvider: string | null;
     cwd: string;
     additionalDirectories: string[];
+    mcpServers?: Array<acp.McpServer>;
     fastModeEnabled: boolean;
     currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
@@ -213,6 +218,15 @@ interface ActivePrompt {
     complete: () => void;
 }
 
+export interface CodexProcessState {
+    connection: CodexConnection;
+    codexPath: string | undefined;
+    config: JsonObject | undefined;
+    modelProvider: string | undefined;
+    stderr: string;
+    stderrProcess?: CodexConnection["process"];
+}
+
 export class CodexAcpServer {
     private static readonly MODEL_NAME_TOKEN_OVERRIDES: Record<string, string> = {
         gpt: "GPT",
@@ -220,13 +234,13 @@ export class CodexAcpServer {
         codex: "Codex",
     };
 
-    private readonly codexAcpClient: CodexAcpClient;
+    private codexAcpClient: CodexAcpClient;
     private readonly connection: AcpClientConnection;
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
     private readonly getRecentStderr: () => string;
     private readonly sessionFailureEpoch: string;
-    private readonly availableCommands: CodexCommands;
+    private availableCommands: CodexCommands;
     private clientInfo: acp.Implementation | null;
     private clientCapabilities: acp.ClientCapabilities | null;
     private terminalOutputMode: TerminalOutputMode;
@@ -241,6 +255,9 @@ export class CodexAcpServer {
     private readonly sessionGenerations: Map<string, number>;
     private readonly sessionOpenGenerations: Map<string, number>;
     private readonly goalControlGenerations: Map<string, number>;
+    private readonly codexProcessState: CodexProcessState | null;
+    private initializeRequest: acp.InitializeRequest | null = null;
+    private providerUpdate: Promise<void> | null = null;
 
     constructor(
         connection: AcpClientConnection,
@@ -248,6 +265,7 @@ export class CodexAcpServer {
         defaultAuthRequest?: CodexAuthRequest,
         getExitCode?: () => number | null,
         getRecentStderr?: () => string,
+        codexProcessState?: CodexProcessState,
     ) {
         this.sessions = new Map();
         this.pendingMcpStartupSessions = new Map();
@@ -261,16 +279,22 @@ export class CodexAcpServer {
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
         this.defaultAuthRequest = defaultAuthRequest ?? null;
-        this.getExitCode = getExitCode ?? (() => null);
-        this.getRecentStderr = getRecentStderr ?? (() => "");
+        this.codexProcessState = codexProcessState ?? null;
+        this.captureStderr();
+        this.getExitCode = getExitCode ?? (() => this.codexProcessState?.connection.process.exitCode ?? null);
+        this.getRecentStderr = getRecentStderr ?? (() => this.codexProcessState?.stderr ?? "");
         this.sessionFailureEpoch = randomUUID();
         this.clientInfo = null;
         this.clientCapabilities = null;
         this.terminalOutputMode = "terminal_output_delta";
         this.booleanConfigOptionsSupported = false;
-        this.availableCommands = new CodexCommands(
-            connection,
-            codexAcpClient,
+        this.availableCommands = this.createAvailableCommands(codexAcpClient);
+    }
+
+    private createAvailableCommands(client: CodexAcpClient): CodexCommands {
+        return new CodexCommands(
+            this.connection,
+            client,
             (operation) => this.runWithProcessCheck(operation),
             () => this.refreshSessionsAuthState(null)
         );
@@ -282,6 +306,7 @@ export class CodexAcpServer {
         logger.log("Initialize request received");
         this.clientInfo = _params.clientInfo ?? null;
         this.clientCapabilities = _params.clientCapabilities ?? null;
+        this.initializeRequest = _params;
         this.terminalOutputMode = resolveTerminalOutputMode(_params.clientCapabilities);
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         await this.runWithProcessCheck(() => this.codexAcpClient.initialize(_params));
@@ -593,6 +618,7 @@ export class CodexAcpServer {
             authProvider: authProvider,
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
+            mcpServers: requestedMcpServers,
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
@@ -655,6 +681,9 @@ export class CodexAcpServer {
     }
 
     async loadSession(params: acp.LoadSessionRequest): Promise<LegacyLoadSessionResponse> {
+        if (this.providerUpdate !== null) {
+            await this.providerUpdate;
+        }
         logger.log("Loading session...", {sessionId: params.sessionId});
         const {
             sessionId,
@@ -678,6 +707,9 @@ export class CodexAcpServer {
     }
 
     async resumeSession(params: acp.ResumeSessionRequest): Promise<LegacyResumeSessionResponse> {
+        if (this.providerUpdate !== null) {
+            await this.providerUpdate;
+        }
         logger.log("Resuming session...", {sessionId: params.sessionId});
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
@@ -786,6 +818,9 @@ export class CodexAcpServer {
     async newSession(
         params: acp.NewSessionRequest,
     ): Promise<LegacyNewSessionResponse> {
+        if (this.providerUpdate !== null) {
+            await this.providerUpdate;
+        }
         logger.log("Starting new session...");
         const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
 
@@ -843,14 +878,113 @@ export class CodexAcpServer {
         return { providers: this.codexAcpClient.listProviders() };
     }
 
-    setProvider(params: acp.SetProviderRequest): acp.SetProviderResponse {
+    async setProvider(params: acp.SetProviderRequest): Promise<acp.SetProviderResponse> {
         this.codexAcpClient.setProvider(params);
+        await this.enqueueProviderUpdate((client) => client.setProvider(params));
         return { };
     }
 
-    disableProvider(params: acp.DisableProviderRequest): acp.DisableProviderResponse {
+    async disableProvider(params: acp.DisableProviderRequest): Promise<acp.DisableProviderResponse> {
         this.codexAcpClient.disableProvider(params);
+        if (params.providerId !== OPENAI_PROVIDER_ID) {
+            return { };
+        }
+        await this.enqueueProviderUpdate((client) => client.disableProvider(params));
         return { };
+    }
+
+    private async enqueueProviderUpdate(apply: (client: CodexAcpClient) => void): Promise<void> {
+        const previous = this.providerUpdate?.catch(() => undefined) ?? Promise.resolve();
+        const update = previous.then(async () => {
+            if (this.sessions.size === 0) {
+                return;
+            }
+
+            const activePrompts = [...this.activePrompts.values()].map(prompt => prompt.completion);
+            if (activePrompts.length > 0) {
+                logger.log("Waiting for active prompts before provider restart", {count: activePrompts.length});
+                await Promise.all(activePrompts);
+            }
+
+            logger.log("Restarting Codex app-server for provider update", {sessionCount: this.sessions.size});
+            const replacement = await this.restartCodexClient();
+            apply(replacement);
+            if (this.initializeRequest === null) {
+                throw new Error("Cannot restart Codex app-server before ACP initialization");
+            }
+            await replacement.initialize(this.initializeRequest);
+            this.codexAcpClient = replacement;
+            this.availableCommands = this.createAvailableCommands(replacement);
+
+            const resumeErrors: unknown[] = [];
+            for (const session of this.sessions.values()) {
+                try {
+                    await replacement.resumeSession({
+                        sessionId: session.sessionId,
+                        cwd: session.cwd,
+                        additionalDirectories: session.additionalDirectories,
+                        mcpServers: session.mcpServers ?? [],
+                    });
+                    session.authProvider = replacement.getModelProvider();
+                    logger.log("Resumed session after provider restart", {sessionId: session.sessionId});
+                } catch (error) {
+                    resumeErrors.push(error);
+                    logger.error(`Failed to resume session ${session.sessionId} after provider restart`, error);
+                }
+            }
+            if (resumeErrors.length > 0) {
+                throw new AggregateError(resumeErrors, `Failed to resume ${resumeErrors.length} session(s) after provider restart`);
+            }
+        });
+        this.providerUpdate = update;
+        try {
+            await update;
+        } finally {
+            if (this.providerUpdate === update) {
+                this.providerUpdate = null;
+            }
+        }
+    }
+
+    private captureStderr(): void {
+        const state = this.codexProcessState;
+        if (state === null || state.stderrProcess === state.connection.process) {
+            return;
+        }
+        state.stderrProcess = state.connection.process;
+        state.connection.process.stderr.addListener("data", (data: Buffer) => {
+            state.stderr = (state.stderr + data.toString()).slice(-2 * 1024);
+        });
+    }
+
+    private async restartCodexClient(): Promise<CodexAcpClient> {
+        const state = this.codexProcessState;
+        if (state === null) {
+            throw new Error("Codex process state is unavailable");
+        }
+
+        const previous = state.connection;
+        const exited = previous.process.exitCode === null
+            ? once(previous.process, "exit")
+            : Promise.resolve();
+        previous.process.stdin.end();
+        const forceKill = setTimeout(() => {
+            if (previous.process.exitCode === null) {
+                logger.log("Codex still running 2s after provider restart; terminating process");
+                previous.process.kill();
+            }
+        }, 2000);
+        await exited;
+        clearTimeout(forceKill);
+
+        state.stderr = "";
+        state.connection = startCodexConnection(state.codexPath);
+        this.captureStderr();
+        return new CodexAcpClient(
+            new CodexAppServerClient(state.connection.connection),
+            state.config,
+            state.modelProvider,
+        );
     }
 
     private async refreshSessionsAuthState(authProvider: string | null): Promise<void> {
@@ -1482,6 +1616,7 @@ export class CodexAcpServer {
             authProvider: authProvider,
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
+            mcpServers: requestedMcpServers,
             fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
@@ -2092,6 +2227,9 @@ export class CodexAcpServer {
         signal?: AbortSignal,
         onTurnStarted?: () => void,
     ): Promise<acp.PromptResponse> {
+        if (this.providerUpdate !== null) {
+            await this.providerUpdate;
+        }
         logger.log("Prompt received", {
             sessionId: params.sessionId,
             prompt: params.prompt,
