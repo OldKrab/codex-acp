@@ -6,6 +6,8 @@ import type {
     ServerNotification
 } from "./app-server";
 import type {
+    CancelLoginAccountParams,
+    CancelLoginAccountResponse,
     ConfigReadParams,
     ConfigReadResponse,
     GetAccountParams,
@@ -41,6 +43,8 @@ import type {
     ThreadGoalGetResponse,
     ThreadGoalSetParams,
     ThreadGoalSetResponse,
+    ThreadForkParams,
+    ThreadForkResponse,
     ThreadLoadedListParams,
     ThreadLoadedListResponse,
     ThreadListParams,
@@ -528,6 +532,10 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/resume", params: params });
     }
 
+    async threadFork(params: ThreadForkParams): Promise<ThreadForkResponse> {
+        return await this.sendRequest({ method: "thread/fork", params: params });
+    }
+
     getThreadSettings(threadId: string): ThreadSettings | undefined {
         return this.threadSettings.get(threadId);
     }
@@ -578,6 +586,10 @@ export class CodexAppServerClient {
 
     async accountLogin(params: LoginAccountParams): Promise<LoginAccountResponse> {
         return await this.sendRequest({ method: "account/login/start", params: params });
+    }
+
+    async accountLoginCancel(params: CancelLoginAccountParams): Promise<CancelLoginAccountResponse> {
+        return await this.sendRequest({ method: "account/login/cancel", params: params });
     }
 
     async accountLogout(): Promise<LogoutAccountResponse> {
