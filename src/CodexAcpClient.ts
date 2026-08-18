@@ -51,6 +51,7 @@ import packageJson from "../package.json";
 import type {AuthenticationStatusResponse} from "./AcpExtensions";
 import {createCodexCollaborationMode} from "./CollaborationModeConfig";
 import type {ModeKind} from "./app-server/ModeKind";
+import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUtils";
 import {
     AGENT_FILE_CHANGE_REPORT_DEVELOPER_INSTRUCTIONS,
     AGENT_FILE_CHANGE_REPORT_OUTPUT_SCHEMA,
@@ -1053,6 +1054,13 @@ export class CodexAcpClient {
             "unknown",
         ];
         const requestedCwd = request.cwd?.trim() ?? null;
+        const filterByCwd = (thread: Thread): boolean => {
+            if (!requestedCwd) return true;
+            if (isAbsolutePathLike(requestedCwd)) {
+                return arePathsEqual(thread.cwd, requestedCwd);
+            }
+            return arePathBasenamesEqual(thread.cwd, requestedCwd);
+        };
 
         const preferredProvider = this.getModelProvider();
         const modelProviders = preferredProvider ? [preferredProvider] : [];
@@ -1077,8 +1085,21 @@ export class CodexAcpClient {
             logger.log("Session list diagnostics", diagnostics);
         }
 
+        // App Server owns pagination; normalize the returned page for ACP path compatibility.
+        let sessions = listResponse.data.map(mapThreadToSession);
+        if (requestedCwd) {
+            const filtered = listResponse.data
+                .filter(filterByCwd)
+                .map(mapThreadToSession);
+            if (filtered.length > 0 || isAbsolutePathLike(requestedCwd)) {
+                sessions = filtered;
+            } else {
+                logger.log("Ignoring non-absolute cwd filter for session/list", {cwd: requestedCwd});
+            }
+        }
+
         return {
-            sessions: listResponse.data.map(mapThreadToSession),
+            sessions,
             nextCursor: listResponse.nextCursor ?? null,
         };
     }
