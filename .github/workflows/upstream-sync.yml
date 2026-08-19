@@ -22,14 +22,12 @@ jobs:
     steps:
       - name: Generate repository token
         id: repository-token
+        # Match the other release workflows: the shared App installation owns
+        # its permission policy, and rejects a separately narrowed token request.
         uses: actions/create-github-app-token@v3
         with:
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-          # Upstream release commits can change files under .github/workflows.
-          permission-workflows: write
 
       # App-authored pull requests trigger the ordinary pull_request CI workflow.
       - uses: actions/checkout@v7
