@@ -1,0 +1,142 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPOSITORY: agentclientprotocol/codex-acp
+
+jobs:
+  open-update:
+    name: Open an upstream release PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate repository token
+        id: repository-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          # Upstream release commits can change files under .github/workflows.
+          permission-workflows: write
+
+      # App-authored pull requests trigger the ordinary pull_request CI workflow.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ steps.repository-token.outputs.token }}
+
+      - name: Find the latest upstream release
+        id: release
+        env:
+          GH_TOKEN: ${{ steps.repository-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="$(gh api "repos/${UPSTREAM_REPOSITORY}/releases/latest" --jq .tag_name)"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Unexpected upstream release tag: $tag" >&2
+            exit 1
+          fi
+
+          branch="shushakov/sync-upstream-${tag}"
+          tracked="$(jq -r '.openaideUpstream // empty' package.json)"
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+          if [[ "$tracked" == "${UPSTREAM_REPOSITORY}@${tag}" ]]; then
+            echo "The fork already records ${UPSTREAM_REPOSITORY}@${tag}"
+            echo "required=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Fetch only the immutable release tag. The namespaced ref cannot
+          # collide with the fork's independent release tags.
+          git fetch --no-tags "https://github.com/${UPSTREAM_REPOSITORY}.git" \
+            "refs/tags/${tag}:refs/upstream-releases/${tag}"
+          commit="$(git rev-parse "refs/upstream-releases/${tag}^{commit}")"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor "$commit" HEAD; then
+            echo "Upstream ${tag} is already in the fork history"
+            echo "required=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "required=true" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release branch
+        if: steps.release.outputs.required == 'true'
+        id: publish-branch
+        env:
+          BRANCH: ${{ steps.release.outputs.branch }}
+          GH_TOKEN: ${{ steps.repository-token.outputs.token }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          existing_pr="$(gh pr list \
+            --head "$BRANCH" \
+            --state all \
+            --json number \
+            --jq '.[0].number // empty')"
+          if [[ -n "$existing_pr" ]]; then
+            echo "Pull request #${existing_pr} already tracks this release"
+            echo "create_pr=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git ls-remote --exit-code --heads origin "refs/heads/${BRANCH}" >/dev/null 2>&1; then
+            # The branch is the exact upstream release, not a generated merge.
+            # GitHub can therefore show conflicts without the bot guessing how
+            # fork-owned package identity and release files should be resolved.
+            git push origin "${RELEASE_COMMIT}:refs/heads/${BRANCH}"
+          fi
+
+          echo "create_pr=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open the update pull request
+        if: steps.publish-branch.outputs.create_pr == 'true'
+        env:
+          BRANCH: ${{ steps.release.outputs.branch }}
+          GH_TOKEN: ${{ steps.repository-token.outputs.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          body="$(mktemp)"
+          trap 'rm -f "$body"' EXIT
+          cat > "$body" <<EOF
+          Tracks the exact [upstream ${TAG} release](https://github.com/${UPSTREAM_REPOSITORY}/releases/tag/${TAG}).
+
+          Before merging:
+
+          - preserve the \`@openaide/codex-acp\` package identity and independent release configuration;
+          - update \`package.json#openaideUpstream\` to \`${UPSTREAM_REPOSITORY}@${TAG}\`;
+          - regenerate \`package-lock.json\` after resolving package metadata conflicts; and
+          - run the normal CI suite against the resolved merge.
+
+          This branch intentionally points at the immutable upstream release commit. Any conflicts remain visible for review instead of being auto-resolved by the workflow.
+          EOF
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: sync upstream ${TAG}" \
+            --body-file "$body"
