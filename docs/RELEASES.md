@@ -159,7 +159,7 @@ its own PR.
 
 | Secret                                                        | Used for                                                          |
 | ------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `RELEASE_PLZ_APP_ID`, `RELEASE_PLZ_APP_PRIVATE_KEY`           | App token for release PRs and tags, so they can trigger workflows |
+| `RELEASE_APP_CLIENT_ID`, `RELEASE_APP_PRIVATE_KEY`            | App token for release PRs and tags, so they can trigger workflows |
 | `REGISTRY_UPDATER_APP_ID`, `REGISTRY_UPDATER_APP_PRIVATE_KEY` | App token scoped to the `registry` repository                     |
 | `OPENAI_API_KEY`                                              | The e2e suite in the `verify` job                                 |
 
