@@ -144,16 +144,16 @@ and publishing and only re-dispatches the registry update.
 ## Upstream updates
 
 `upstream-sync.yml` checks the latest `agentclientprotocol/codex-acp` GitHub
-release every day and opens one update PR per release. The PR branch points at
-the immutable upstream release commit so GitHub exposes the real merge and any
-conflicts for review; the workflow does not guess how to reconcile fork-owned
-package identity or release files.
+release every day and opens one update PR per release. The PR branch merges the
+immutable upstream release into the fork and resolves the deterministic
+fork-owned conflicts before pushing: OpenAIDE package identity and versioning,
+the release manifest, package lockfile, and publishing workflow. Package fields
+changed only by upstream are imported; a field changed differently on both
+sides fails explicitly instead of being guessed.
 
-Before merging an upstream update, preserve the `@openaide/codex-acp` package
-identity and independent release configuration, update `openaideUpstream` in
-`package.json`, regenerate the lockfile, and let the normal PR CI pass. A closed
-update PR is treated as an intentional dismissal; the next upstream release gets
-its own PR.
+Before merging an upstream update, review the resulting product changes and let
+the normal PR CI pass. A closed update PR is treated as an intentional dismissal;
+the next upstream release gets its own PR.
 
 ## Credentials and repository settings
 
