@@ -141,6 +141,20 @@ npm versions are immutable. If the package already published and only the
 registry update failed, pass `-f publish_npm=false` so the run skips verification
 and publishing and only re-dispatches the registry update.
 
+## Upstream updates
+
+`upstream-sync.yml` checks the latest `agentclientprotocol/codex-acp` GitHub
+release every day and opens one update PR per release. The PR branch points at
+the immutable upstream release commit so GitHub exposes the real merge and any
+conflicts for review; the workflow does not guess how to reconcile fork-owned
+package identity or release files.
+
+Before merging an upstream update, preserve the `@openaide/codex-acp` package
+identity and independent release configuration, update `openaideUpstream` in
+`package.json`, regenerate the lockfile, and let the normal PR CI pass. A closed
+update PR is treated as an intentional dismissal; the next upstream release gets
+its own PR.
+
 ## Credentials and repository settings
 
 | Secret                                                        | Used for                                                          |
@@ -151,6 +165,10 @@ and publishing and only re-dispatches the registry update.
 
 Publishing to npm uses OIDC trusted publishing, so there is no npm token. The
 release-please, publish and registry jobs run in the `release` environment.
+
+The release GitHub App also needs repository `Contents: write`, `Pull requests:
+write`, and `Workflows: write` permissions. The workflow permission is required
+because an upstream release commit can update files under `.github/workflows`.
 
 Because those jobs are now triggered by pushes to `main` rather than by a `v*`
 tag, the `release` environment's deployment branch policy has to allow the `main`
