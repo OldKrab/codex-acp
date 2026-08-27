@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.2](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.1...openaide-codex-acp-v1.1.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* project parent prompts into child sessions ([#13](https://github.com/OldKrab/codex-acp/issues/13)) ([769f8c0](https://github.com/OldKrab/codex-acp/commit/769f8c06583062bd9243ea58b5de2e6a4b18f41f))
+* validate configured release tag namespace ([#15](https://github.com/OldKrab/codex-acp/issues/15)) ([2dd8b66](https://github.com/OldKrab/codex-acp/commit/2dd8b66aa035c3401da9e16d7572447c451212f0))
+
 ## [1.1.1](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.0...openaide-codex-acp-v1.1.1) (2026-08-27)
 
 
