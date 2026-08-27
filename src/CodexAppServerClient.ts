@@ -43,6 +43,8 @@ import type {
     ThreadGoalGetResponse,
     ThreadGoalSetParams,
     ThreadGoalSetResponse,
+    ThreadForkParams,
+    ThreadForkResponse,
     ThreadLoadedListParams,
     ThreadLoadedListResponse,
     ThreadListParams,
@@ -218,11 +220,11 @@ export class CodexAppServerClient {
 
         this.connection.onRequest(PermissionsApprovalRequest, async (params) => {
             if (this.isStaleTurn(params.threadId, params.turnId)) {
-                return { permissions: {}, scope: "turn", strictAutoReview: true };
+                return { permissions: {}, scope: "turn", strictAutoReview: false };
             }
             const handler = this.approvalHandlers.get(params.threadId);
             if (!handler) {
-                return { permissions: {}, scope: "turn", strictAutoReview: true };
+                return { permissions: {}, scope: "turn", strictAutoReview: false };
             }
             return await handler.handlePermissionsRequest(params);
         });
@@ -528,6 +530,10 @@ export class CodexAppServerClient {
 
     async threadResume(params: ThreadResumeParams): Promise<ThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
+    }
+
+    async threadFork(params: ThreadForkParams): Promise<ThreadForkResponse> {
+        return await this.sendRequest({ method: "thread/fork", params: params });
     }
 
     getThreadSettings(threadId: string): ThreadSettings | undefined {
