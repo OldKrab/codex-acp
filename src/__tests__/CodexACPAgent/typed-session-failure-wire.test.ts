@@ -5,12 +5,30 @@ import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAcpServer} from "../../CodexAcpServer";
 import {createTestSessionState} from "../acp-test-utils";
 import {createMockConnections} from "./test-utils";
+import {clientSupportsSubagents} from "../../subagents/AcpSubagents";
 
 const typedFailureCapabilities: acp.ClientCapabilities = {
     _meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}},
 };
 
 describe("typed session failures over ACP transport", () => {
+    it("negotiates native subagents through OpenAIDE metadata across the SDK boundary", async () => {
+        const fixture = createWireFixture();
+        const response = await fixture.client.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {
+                _meta: {openaide: {nativeSubagentSessions: true}},
+            },
+        });
+
+        expect((response.agentCapabilities!.sessionCapabilities as {subagents?: unknown}).subagents)
+            .toEqual({});
+        expect(fixture.server["clientCapabilities"]?._meta).toMatchObject({
+            openaide: {nativeSubagentSessions: true},
+        });
+        expect(clientSupportsSubagents(fixture.server["clientCapabilities"])).toBe(true);
+    });
+
     it("negotiates native subagents through AIR metadata across the SDK boundary", async () => {
         const fixture = createWireFixture();
         const response = await fixture.client.initialize({
