@@ -549,6 +549,14 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             {
                 sessionId: "thread-paris",
                 update: {
+                    sessionUpdate: "user_message_chunk",
+                    content: {type: "text", text: "Find the current weather in Paris."},
+                    messageId: "collab:call-spawn-weather:prompt",
+                },
+            },
+            {
+                sessionId: "thread-paris",
+                update: {
                     sessionUpdate: "agent_message_chunk",
                     content: {type: "text", text: "Weather found"},
                     messageId: "child-message",
@@ -577,6 +585,173 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         const permissionRequest = mockFixture.getAcpConnectionEvents([])
             .find(event => event.method === "requestPermission" && event.args[0].toolCall.toolCallId === "child-command");
         expect(permissionRequest).toBeUndefined();
+    });
+
+    it("projects the delegated prompt as the first message in native child history", async () => {
+        await initializeNativeSubagents();
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "collabAgentToolCall",
+                        id: "call-spawn-child",
+                        tool: "spawnAgent",
+                        status: "inProgress",
+                        senderThreadId: sessionId,
+                        receiverThreadIds: ["child-1"],
+                        prompt: "Inspect the failing test.",
+                        model: null,
+                        reasoningEffort: null,
+                        agentsStates: {"child-1": {status: "running", message: null}},
+                    },
+                },
+            },
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-child",
+                        kind: "started",
+                        agentThreadId: "child-1",
+                        agentPath: "/root/test_investigator",
+                    },
+                },
+            },
+        ]);
+
+        const childUpdates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate" && event.args[0].sessionId === "child-1")
+            .map(event => event.args[0].update);
+        expect(childUpdates).toContainEqual({
+            sessionUpdate: "user_message_chunk",
+            content: {type: "text", text: "Inspect the failing test."},
+            messageId: "collab:call-spawn-child:prompt",
+        });
+    });
+
+    it("projects a delegated prompt that arrives after the child activity", async () => {
+        await initializeNativeSubagents();
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-child",
+                        kind: "started",
+                        agentThreadId: "child-1",
+                        agentPath: "/root/test_investigator",
+                    },
+                },
+            },
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "collabAgentToolCall",
+                        id: "late-spawn-call",
+                        tool: "spawnAgent",
+                        status: "inProgress",
+                        senderThreadId: sessionId,
+                        receiverThreadIds: ["child-1"],
+                        prompt: "Inspect the late failure.",
+                        model: null,
+                        reasoningEffort: null,
+                        agentsStates: {"child-1": {status: "running", message: null}},
+                    },
+                },
+            },
+        ]);
+
+        const childUpdates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate" && event.args[0].sessionId === "child-1")
+            .map(event => event.args[0].update);
+        expect(childUpdates).toContainEqual({
+            sessionUpdate: "user_message_chunk",
+            content: {type: "text", text: "Inspect the late failure."},
+            messageId: "collab:late-spawn-call:prompt",
+        });
+    });
+
+    it("projects parent follow-up input into the reactivated child history", async () => {
+        await initializeNativeSubagents();
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-child",
+                        kind: "started",
+                        agentThreadId: "child-1",
+                        agentPath: "/root/test_investigator",
+                    },
+                },
+            },
+            {
+                method: "turn/completed",
+                params: {
+                    threadId: "child-1",
+                    turn: {
+                        id: "child-turn-1",
+                        items: [],
+                        itemsView: "notLoaded",
+                        status: "completed",
+                        error: null,
+                        startedAt: null,
+                        completedAt: null,
+                        durationMs: null,
+                    },
+                },
+            },
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "collabAgentToolCall",
+                        id: "call-follow-up",
+                        tool: "sendInput",
+                        status: "inProgress",
+                        senderThreadId: sessionId,
+                        receiverThreadIds: ["child-1"],
+                        prompt: "Check the second failure too.",
+                        model: null,
+                        reasoningEffort: null,
+                        agentsStates: {"child-1": {status: "running", message: null}},
+                    },
+                },
+            },
+        ]);
+
+        const childUpdates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate"
+                && event.args[0].sessionId === "child-1:generation:2")
+            .map(event => event.args[0].update);
+        expect(childUpdates).toContainEqual({
+            sessionUpdate: "user_message_chunk",
+            content: {type: "text", text: "Check the second failure too."},
+            messageId: "collab:call-follow-up:prompt",
+        });
     });
 
     it("routes nested agents through their immediate parent sessions", async () => {
@@ -658,7 +833,9 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             .map(event => event.args[0]);
         expect(updates.map(({sessionId: target, update}) => [target, update.sessionUpdate])).toEqual([
             [sessionId, "subagent_spawned"],
+            ["child-1", "user_message_chunk"],
             ["child-1", "subagent_spawned"],
+            ["grandchild-1", "user_message_chunk"],
             ["grandchild-1", "agent_message_chunk"],
             ["child-1", "subagent_state_update"],
             [sessionId, "subagent_state_update"],
@@ -720,9 +897,10 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         const updates = mockFixture.getAcpConnectionEvents([])
             .filter(event => event.method === "sessionUpdate")
             .map(event => event.args[0].update);
-        expect(updates).toHaveLength(2);
+        expect(updates).toHaveLength(3);
         expect(updates.map(update => update.sessionUpdate)).toEqual([
             "subagent_spawned",
+            "user_message_chunk",
             "subagent_state_update",
         ]);
     });
@@ -782,6 +960,8 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             .map(event => event.args[0].update);
         expect(updates.map(update => [update.sessionUpdate, update.toolCallId, update.title])).toEqual([
             ["subagent_spawned", undefined, undefined],
+            ["user_message_chunk", undefined, undefined],
+            ["user_message_chunk", undefined, undefined],
             ["tool_call", "send-input", "sendInput"],
             ["tool_call_update", "send-input", "sendInput"],
             ["subagent_state_update", undefined, undefined],

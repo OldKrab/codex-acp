@@ -25,6 +25,7 @@ type PendingSubagent = {
     parentThreadId: string;
     parentSessionId: string;
     task: string;
+    promptSourceId?: string;
     buffered: ServerNotification[];
     droppedBufferedNotifications: number;
 };
@@ -41,6 +42,7 @@ export class CodexSubagentEventRouter {
     private readonly materializationWaiters = new Map<string, Set<(sessionId: string | null) => void>>();
     private readonly replayQueue: ServerNotification[] = [];
     private readonly activeLegacyActivities = new Set<string>();
+    private readonly projectedPromptIds = new Set<string>();
 
     constructor(
         private readonly rootSessionId: string,
@@ -115,6 +117,11 @@ export class CodexSubagentEventRouter {
                     await this.reopen(childThreadId);
                 }
             }
+            if (item.tool === "sendInput" && notification.method === "item/started" && item.prompt?.trim()) {
+                for (const childThreadId of item.receiverThreadIds) {
+                    await this.projectPrompt(childThreadId, item.id, item.prompt.trim());
+                }
+            }
         }
 
         let representedSpawn = false;
@@ -131,8 +138,14 @@ export class CodexSubagentEventRouter {
                     logger.log(`Ignoring self-referential spawned subagent ${childSessionId}`);
                     continue;
                 }
-                if (this.children.has(childSessionId)
-                    || this.pendingSpawns.has(childSessionId)
+                if (this.children.has(childSessionId)) {
+                    representedSpawn = true;
+                    if (notification.method === "item/started" && item.prompt?.trim()) {
+                        await this.projectPrompt(childSessionId, item.id, item.prompt.trim());
+                    }
+                    continue;
+                }
+                if (this.pendingSpawns.has(childSessionId)
                     || this.terminalPendingSpawns.has(childSessionId)) {
                     representedSpawn = true;
                     continue;
@@ -141,6 +154,7 @@ export class CodexSubagentEventRouter {
                     parentThreadId,
                     parentSessionId,
                     task: item.prompt?.trim() || "Delegated task",
+                    ...(item.prompt?.trim() ? {promptSourceId: item.id} : {}),
                     buffered: [],
                     droppedBufferedNotifications: 0,
                 });
@@ -296,9 +310,29 @@ export class CodexSubagentEventRouter {
             path: normalizeAgentPath(path),
             generation: 1,
         });
+        if (pending?.promptSourceId) {
+            await this.projectPrompt(childSessionId, pending.promptSourceId, pending.task);
+        }
         this.pendingSpawns.delete(childSessionId);
         this.replayQueue.push(...(pending?.buffered ?? []));
         this.resolveMaterialization(childSessionId, childSessionId);
+    }
+
+    private async projectPrompt(
+        childThreadId: string,
+        sourceId: string,
+        prompt: string,
+    ): Promise<void> {
+        const child = this.children.get(childThreadId);
+        if (!child) return;
+        const messageId = `collab:${sourceId}:prompt`;
+        if (this.projectedPromptIds.has(messageId)) return;
+        await this.session.update({
+            sessionUpdate: "user_message_chunk",
+            content: {type: "text", text: prompt},
+            messageId,
+        }, child.sessionId);
+        this.projectedPromptIds.add(messageId);
     }
 
     private finishPending(childSessionId: string): void {
