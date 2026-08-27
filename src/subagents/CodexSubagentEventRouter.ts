@@ -117,7 +117,7 @@ export class CodexSubagentEventRouter {
                     await this.reopen(childThreadId);
                 }
             }
-            if (item.tool === "sendInput" && notification.method === "item/started" && item.prompt?.trim()) {
+            if (item.tool === "sendInput" && item.prompt?.trim()) {
                 for (const childThreadId of item.receiverThreadIds) {
                     await this.projectPrompt(childThreadId, item.id, item.prompt.trim());
                 }
@@ -140,7 +140,7 @@ export class CodexSubagentEventRouter {
                 }
                 if (this.children.has(childSessionId)) {
                     representedSpawn = true;
-                    if (notification.method === "item/started" && item.prompt?.trim()) {
+                    if (item.prompt?.trim()) {
                         await this.projectPrompt(childSessionId, item.id, item.prompt.trim());
                     }
                     continue;
