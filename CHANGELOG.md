@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.4](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.3...openaide-codex-acp-v1.1.4) (2026-08-27)
+
+
+### Bug Fixes
+
+* project causal turns into activity-only children ([#18](https://github.com/OldKrab/codex-acp/issues/18)) ([8d9b5e2](https://github.com/OldKrab/codex-acp/commit/8d9b5e27eac1502ace50853e0fec751cafdbb596))
+
 ## [1.1.3](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.2...openaide-codex-acp-v1.1.3) (2026-08-27)
 
 
