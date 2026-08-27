@@ -637,7 +637,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         });
     });
 
-    it("projects a delegated prompt that arrives after the child activity", async () => {
+    it("projects a completed delegated prompt that arrives after the child activity", async () => {
         await initializeNativeSubagents();
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
             {
@@ -656,11 +656,11 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                 },
             },
             {
-                method: "item/started",
+                method: "item/completed",
                 params: {
                     threadId: sessionId,
                     turnId: "turn-1",
-                    startedAtMs: 0,
+                    completedAtMs: 0,
                     item: {
                         type: "collabAgentToolCall",
                         id: "late-spawn-call",
@@ -687,7 +687,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         });
     });
 
-    it("projects parent follow-up input into the reactivated child history", async () => {
+    it("projects completed parent follow-up input into the reactivated child history", async () => {
         await initializeNativeSubagents();
         await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
             {
@@ -722,11 +722,11 @@ describe("CodexEventHandler - collab agent tool call events", () => {
                 },
             },
             {
-                method: "item/started",
+                method: "item/completed",
                 params: {
                     threadId: sessionId,
                     turnId: "turn-1",
-                    startedAtMs: 0,
+                    completedAtMs: 0,
                     item: {
                         type: "collabAgentToolCall",
                         id: "call-follow-up",
