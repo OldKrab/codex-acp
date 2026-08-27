@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.0...openaide-codex-acp-v1.1.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* negotiate OpenAIDE native subagents across SDK ([bfbe845](https://github.com/OldKrab/codex-acp/commit/bfbe8459ce4067d25feb5df773caef1d277ac238))
+* negotiate OpenAIDE native subagents across SDK ([9f86878](https://github.com/OldKrab/codex-acp/commit/9f86878db134d8a580478c83601e177b146342d8))
+
 ## [1.1.0](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.0.0...openaide-codex-acp-v1.1.0) (2026-08-27)
 
 
