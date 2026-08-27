@@ -43,6 +43,7 @@ export class CodexSubagentEventRouter {
     private readonly replayQueue: ServerNotification[] = [];
     private readonly activeLegacyActivities = new Set<string>();
     private readonly projectedPromptIds = new Set<string>();
+    private readonly causalRootPrompts = new Map<string, {sourceId: string; text: string}>();
 
     constructor(
         private readonly rootSessionId: string,
@@ -94,15 +95,29 @@ export class CodexSubagentEventRouter {
             // collaboration lifecycle as ordinary ACP tool calls.
             return false;
         }
+        if (item.type === "userMessage" && notification.params.threadId === this.rootSessionId) {
+            const text = item.content
+                .filter(content => content.type === "text")
+                .map(content => content.text)
+                .join("")
+                .trim();
+            if (text) this.causalRootPrompts.set(notification.params.turnId, {sourceId: item.id, text});
+            return false;
+        }
         if (item.type === "subAgentActivity") {
             // Codex reports the root participant through the same activity item
             // shape as children. It is the parent conversation, not a subagent.
             if (isRootAgentPath(item.agentPath)) return true;
             if (this.terminalPendingSpawns.has(item.agentThreadId)) return true;
+            if (item.kind === "interacted") await this.reopen(item.agentThreadId);
             let hasNativeRepresentation = this.children.has(item.agentThreadId);
             if (!hasNativeRepresentation) {
                 await this.materialize(item.agentThreadId, item.agentPath);
                 hasNativeRepresentation = this.children.has(item.agentThreadId);
+            }
+            if (hasNativeRepresentation && item.kind !== "interrupted") {
+                const prompt = this.causalRootPrompts.get(notification.params.turnId);
+                if (prompt) await this.projectPrompt(item.agentThreadId, prompt.sourceId, prompt.text);
             }
             if (hasNativeRepresentation && item.kind === "interrupted") {
                 await this.finish(item.agentThreadId, "cancelled");
