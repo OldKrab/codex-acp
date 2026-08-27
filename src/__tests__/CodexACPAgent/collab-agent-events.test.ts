@@ -754,6 +754,138 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         });
     });
 
+    it("uses the causal root user turn when Codex exposes only child activity", async () => {
+        await initializeNativeSubagents();
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "userMessage",
+                        id: "root-user-1",
+                        clientId: null,
+                        content: [{type: "text", text: "Delegate the API review.", text_elements: []}],
+                    },
+                },
+            },
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-child",
+                        kind: "started",
+                        agentThreadId: "child-1",
+                        agentPath: "/root/api_review",
+                    },
+                },
+            },
+        ]);
+
+        const childUpdates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate" && event.args[0].sessionId === "child-1")
+            .map(event => event.args[0].update);
+        expect(childUpdates).toContainEqual({
+            sessionUpdate: "user_message_chunk",
+            content: {type: "text", text: "Delegate the API review."},
+            messageId: "collab:root-user-1:prompt",
+        });
+    });
+
+    it("reopens an interacted child and projects the causal follow-up turn", async () => {
+        await initializeNativeSubagents();
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, [
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-1",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-child",
+                        kind: "started",
+                        agentThreadId: "child-1",
+                        agentPath: "/root/api_review",
+                    },
+                },
+            },
+            {
+                method: "turn/completed",
+                params: {
+                    threadId: "child-1",
+                    turn: {
+                        id: "child-turn-1",
+                        items: [],
+                        itemsView: "notLoaded",
+                        status: "completed",
+                        error: null,
+                        startedAt: null,
+                        completedAt: null,
+                        durationMs: null,
+                    },
+                },
+            },
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-2",
+                    startedAtMs: 0,
+                    item: {
+                        type: "userMessage",
+                        id: "root-user-2",
+                        clientId: null,
+                        content: [{type: "text", text: "Ask it to inspect retries.", text_elements: []}],
+                    },
+                },
+            },
+            {
+                method: "item/started",
+                params: {
+                    threadId: sessionId,
+                    turnId: "turn-2",
+                    startedAtMs: 0,
+                    item: {
+                        type: "subAgentActivity",
+                        id: "activity-follow-up",
+                        kind: "interacted",
+                        agentThreadId: "child-1",
+                        agentPath: "/root/api_review",
+                    },
+                },
+            },
+            {
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: "child-1",
+                    turnId: "child-turn-2",
+                    itemId: "child-message-2",
+                    delta: "Retry review complete.",
+                },
+            },
+        ]);
+
+        const childUpdates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate"
+                && event.args[0].sessionId === "child-1:generation:2")
+            .map(event => event.args[0].update);
+        expect(childUpdates.map(update => update.sessionUpdate)).toEqual([
+            "user_message_chunk",
+            "agent_message_chunk",
+        ]);
+        expect(childUpdates[0]).toMatchObject({
+            content: {type: "text", text: "Ask it to inspect retries."},
+            messageId: "collab:root-user-2:prompt",
+        });
+    });
+
     it("routes nested agents through their immediate parent sessions", async () => {
         await initializeNativeSubagents();
         const collabItem = (
