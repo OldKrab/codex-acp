@@ -140,7 +140,8 @@ describe("CodexACPAgent - loadSession", () => {
         const firstSpawnIndex = updates.findIndex(({update}) => update.subagentSessionId === "child-history"
             && update.sessionUpdate === "subagent_spawned");
         const firstOutputIndex = updates.findIndex(({update}) => update.messageId === "child-history-message-1");
-        const secondSpawnIndex = updates.findIndex(({update}) => update.subagentSessionId === "child-history:generation:2"
+        const secondSpawnIndex = updates.findIndex(({update}, index) => index > firstOutputIndex
+            && update.subagentSessionId === "child-history"
             && update.sessionUpdate === "subagent_spawned");
         const secondOutputIndex = updates.findIndex(({update}) => update.messageId === "child-history-message-2");
         const orphanTerminalIndex = updates.findIndex(({update}) => update.subagentSessionId === "orphan-history"
@@ -150,7 +151,7 @@ describe("CodexACPAgent - loadSession", () => {
         expect(secondOutputIndex).toBeGreaterThan(secondSpawnIndex);
         expect(orphanTerminalIndex).toBeGreaterThan(secondOutputIndex);
         expect(updates[firstOutputIndex]?.sessionId).toBe("child-history");
-        expect(updates[secondOutputIndex]?.sessionId).toBe("child-history:generation:2");
+        expect(updates[secondOutputIndex]?.sessionId).toBe("child-history");
     });
 
     it("should replay history during loadSession", async () => {

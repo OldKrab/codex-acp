@@ -1733,9 +1733,7 @@ export class CodexAcpServer {
                         const previous = announced.get(item.agentThreadId);
                         if (previous && !previous.terminal) continue;
                         const generation = (previous?.generation ?? 0) + 1;
-                        const childSessionId = generation === 1
-                            ? item.agentThreadId
-                            : `${item.agentThreadId}:generation:${generation}`;
+                        const childSessionId = item.agentThreadId;
                         const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
                         await session.update({
                             sessionUpdate: "subagent_spawned",
