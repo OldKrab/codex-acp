@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.5](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.4...openaide-codex-acp-v1.1.5) (2026-08-27)
+
+
+### Bug Fixes
+
+* **subagents:** preserve child session identity on resume ([#20](https://github.com/OldKrab/codex-acp/issues/20)) ([2de6dd8](https://github.com/OldKrab/codex-acp/commit/2de6dd88c5fe9c4a4a059cac41a34e0efe384fb6))
+
 ## [1.1.4](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.3...openaide-codex-acp-v1.1.4) (2026-08-27)
 
 
