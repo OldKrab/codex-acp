@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.3](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.2...openaide-codex-acp-v1.1.3) (2026-08-27)
+
+
+### Bug Fixes
+
+* project prompts from completed child calls ([#16](https://github.com/OldKrab/codex-acp/issues/16)) ([c816e1c](https://github.com/OldKrab/codex-acp/commit/c816e1c350dcddce436b68425ce5eb250010b794))
+
 ## [1.1.2](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.1...openaide-codex-acp-v1.1.2) (2026-08-27)
 
 
