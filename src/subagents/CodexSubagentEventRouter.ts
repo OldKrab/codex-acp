@@ -386,7 +386,7 @@ export class CodexSubagentEventRouter {
             const reopened: NativeSubagent = {
                 parentThreadId: pending.parentThreadId,
                 parentSessionId,
-                sessionId: `${childThreadId}:generation:2`,
+                sessionId: childThreadId,
                 name: fallbackName(childThreadId),
                 task: pending.task,
                 generation: 2,
@@ -403,12 +403,10 @@ export class CodexSubagentEventRouter {
             return;
         }
         if (!child.terminalState) return;
-        const previousSessionId = child.sessionId;
         const previousParentSessionId = child.parentSessionId;
         const previousState = child.terminalState;
         child.parentSessionId = this.children.get(child.parentThreadId)?.sessionId ?? this.rootSessionId;
         child.generation += 1;
-        child.sessionId = `${childThreadId}:generation:${child.generation}`;
         delete child.terminalState;
         try {
             await this.session.update({
@@ -421,7 +419,6 @@ export class CodexSubagentEventRouter {
         }
         catch (error) {
             child.generation -= 1;
-            child.sessionId = previousSessionId;
             child.parentSessionId = previousParentSessionId;
             child.terminalState = previousState;
             throw error;

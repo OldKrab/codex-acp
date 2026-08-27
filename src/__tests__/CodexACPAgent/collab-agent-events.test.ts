@@ -745,7 +745,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
 
         const childUpdates = mockFixture.getAcpConnectionEvents([])
             .filter(event => event.method === "sessionUpdate"
-                && event.args[0].sessionId === "child-1:generation:2")
+                && event.args[0].sessionId === "child-1")
             .map(event => event.args[0].update);
         expect(childUpdates).toContainEqual({
             sessionUpdate: "user_message_chunk",
@@ -874,7 +874,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
 
         const childUpdates = mockFixture.getAcpConnectionEvents([])
             .filter(event => event.method === "sessionUpdate"
-                && event.args[0].sessionId === "child-1:generation:2")
+                && event.args[0].sessionId === "child-1")
             .map(event => event.args[0].update);
         expect(childUpdates.map(update => update.sessionUpdate)).toEqual([
             "user_message_chunk",
@@ -1496,10 +1496,10 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             },
         };
         expect(router.shouldIgnore(output)).toBe(false);
-        expect(router.notificationSessionId(output)).toBe("pre-activity-child:generation:2");
+        expect(router.notificationSessionId(output)).toBe("pre-activity-child");
         const spawn = mockFixture.getAcpConnectionEvents([])
             .find(event => event.method === "sessionUpdate"
-                && event.args[0].update.subagentSessionId === "pre-activity-child:generation:2");
+                && event.args[0].update.subagentSessionId === "pre-activity-child");
         expect(spawn?.args[0].update).toMatchObject({
             sessionUpdate: "subagent_spawned",
             task: "Retryable task",
@@ -1695,7 +1695,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         expect(request?.args[0].sessionId).toBe("pending-child");
     });
 
-    it("uses a new ACP child generation when Codex reactivates a terminal thread", async () => {
+    it("keeps one ACP child session when Codex reactivates a terminal thread", async () => {
         await initializeNativeSubagents();
         const childTurn = (status: "completed" | "inProgress"): ServerNotification => ({
             method: status === "completed" ? "turn/completed" : "turn/started",
@@ -1767,16 +1767,16 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             sessionId,
             update: expect.objectContaining({
                 sessionUpdate: "subagent_spawned",
-                subagentSessionId: "resumable-child:generation:2",
+                subagentSessionId: "resumable-child",
             }),
         }));
         expect(updates).toContainEqual(expect.objectContaining({
-            sessionId: "resumable-child:generation:2",
+            sessionId: "resumable-child",
             update: expect.objectContaining({messageId: "resumed-message"}),
         }));
     });
 
-    it("attaches a resumed nested child to the current parent generation", async () => {
+    it("attaches a resumed nested child to its stable parent session", async () => {
         const router = new CodexSubagentEventRouter(
             sessionId,
             true,
@@ -1844,8 +1844,8 @@ describe("CodexEventHandler - collab agent tool call events", () => {
 
         const nestedSpawn = mockFixture.getAcpConnectionEvents([])
             .find(event => event.method === "sessionUpdate"
-                && event.args[0].update.subagentSessionId === "nested-thread:generation:2");
-        expect(nestedSpawn?.args[0].sessionId).toBe("parent-thread:generation:2");
+                && event.args[0].update.subagentSessionId === "nested-thread");
+        expect(nestedSpawn?.args[0].sessionId).toBe("parent-thread");
     });
 
     it("bounds notifications buffered before a child is announced", async () => {
