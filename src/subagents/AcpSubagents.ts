@@ -56,6 +56,18 @@ export function clientSupportsSubagents(
         return true;
     }
 
+    // SDK 1.4 strips the draft top-level capability before the Agent sees it.
+    // Keep the product-scoped fallback until the SDK publishes ACP PR #1992.
+    const openaide = capabilities?._meta?.["openaide"];
+    if (
+        typeof openaide === "object" &&
+        openaide !== null &&
+        !Array.isArray(openaide) &&
+        (openaide as {nativeSubagentSessions?: unknown}).nativeSubagentSessions === true
+    ) {
+        return true;
+    }
+
     return clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_KEY);
 }
 
