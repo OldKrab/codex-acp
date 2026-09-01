@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.6](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.5...openaide-codex-acp-v1.1.6) (2026-09-01)
+
+
+### Bug Fixes
+
+* classify Guardian reviews as other tools ([#22](https://github.com/OldKrab/codex-acp/issues/22)) ([97b8e9e](https://github.com/OldKrab/codex-acp/commit/97b8e9ea2b4f1bc15a78f9323b2c74c8d7318fae))
+
 ## [1.1.5](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.4...openaide-codex-acp-v1.1.5) (2026-08-27)
 
 
