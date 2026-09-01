@@ -6,7 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "guardian_assessment:review-1",
-        "kind": "think",
+        "kind": "other",
         "title": "Guardian Review",
         "status": "in_progress",
         "content": [

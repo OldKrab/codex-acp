@@ -312,7 +312,7 @@ export function createGuardianApprovalReviewToolCall(
     return {
         sessionUpdate: "tool_call",
         toolCallId: guardianApprovalReviewToolCallId(event.reviewId),
-        kind: "think",
+        kind: "other",
         title: "Guardian Review",
         status: toAcpGuardianApprovalReviewStatus(event.review.status),
         content: createGuardianApprovalReviewContent(event.review, event.action),
