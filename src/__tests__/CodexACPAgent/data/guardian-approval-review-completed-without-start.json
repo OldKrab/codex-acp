@@ -6,7 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "guardian_assessment:review-orphaned",
-        "kind": "think",
+        "kind": "other",
         "title": "Guardian Review",
         "status": "failed",
         "content": [

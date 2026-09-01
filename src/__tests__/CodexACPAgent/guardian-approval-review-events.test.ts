@@ -24,7 +24,7 @@ describe("CodexEventHandler - Guardian approval review events", () => {
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
     });
 
-    it("maps Guardian review start and completion to a think tool call flow", async () => {
+    it("maps Guardian review start and completion to a specifically titled other tool call flow", async () => {
         const started: ServerNotification = {
             method: "item/autoApprovalReview/started",
             params: {
