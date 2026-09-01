@@ -34,6 +34,9 @@ import type {
     AccountUpdatedNotification,
     GetAccountResponse,
     ListMcpServerStatusResponse,
+    McpServerOauthLoginCompletedNotification,
+    McpServerOauthLoginParams,
+    McpServerOauthLoginResponse,
     Model,
     ReviewTarget,
     SkillsListParams,
@@ -1081,6 +1084,19 @@ export class CodexAcpClient {
 
     async listMcpServers(): Promise<ListMcpServerStatusResponse> {
         return this.codexClient.listMcpServerStatus({});
+    }
+
+    async mcpServerOauthLogin(
+        params: McpServerOauthLoginParams,
+    ): Promise<McpServerOauthLoginResponse> {
+        return await this.codexClient.mcpServerOauthLogin(params);
+    }
+
+    async awaitMcpServerOauthLoginCompleted(
+        name: string,
+        threadId: string,
+    ): Promise<McpServerOauthLoginCompletedNotification> {
+        return await this.codexClient.awaitMcpServerOauthLoginCompleted(name, threadId);
     }
 
     async listSessions(request: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
