@@ -68,9 +68,37 @@ export interface GatewayAuthRequest extends AuthenticateRequest {
     };
 }
 
+/**
+ * Whether the `chat-gpt` method can complete on this host.
+ *
+ * Browser sign-in opens the OAuth page with the host's default browser and then waits for the
+ * loopback callback. On a headless host (remote server, systemd unit, container) nothing can open
+ * that page, so `authenticate` would wait forever with no signal to the client. Treat such hosts
+ * like `NO_BROWSER=1`; clients that support URL elicitation still get `chat-gpt-device-code`.
+ */
+export function browserSignInAvailable(
+    env: NodeJS.ProcessEnv = process.env,
+    platform: NodeJS.Platform = process.platform,
+): boolean {
+    if (env["NO_BROWSER"]) {
+        return false;
+    }
+    if (platform === "darwin" || platform === "win32") {
+        return true;
+    }
+    // WSL forwards `open` to the Windows browser without a Linux display server.
+    if (env["WSL_DISTRO_NAME"] || env["WSL_INTEROP"]) {
+        return true;
+    }
+    return Boolean(env["DISPLAY"] || env["WAYLAND_DISPLAY"]);
+}
+
+export const BROWSER_SIGN_IN_UNAVAILABLE_MESSAGE =
+    "Browser sign-in is unavailable on this host. Use ChatGPT (device code) or an API key instead.";
+
 export function getCodexAuthMethods(clientCapabilities?: ClientCapabilities | null, env: NodeJS.ProcessEnv = process.env): AuthMethod[] {
     const authMethods: AuthMethod[] = [ApiKeyAuthMethod];
-    if (!env["NO_BROWSER"]) {
+    if (browserSignInAvailable(env)) {
         authMethods.push(ChatGptAuthMethod);
     }
     if (clientSupportsUrlElicitation(clientCapabilities)) {

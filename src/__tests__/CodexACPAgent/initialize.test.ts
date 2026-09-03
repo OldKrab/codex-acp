@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CodexAcpServer } from '../../CodexAcpServer';
 import * as acp from '@agentclientprotocol/sdk';
 import { createMockConnections } from './test-utils';
-import {getCodexAuthMethods} from "../../CodexAuthMethod";
+import {browserSignInAvailable, getCodexAuthMethods} from "../../CodexAuthMethod";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 import packageJson from "../../../package.json";
@@ -147,10 +147,28 @@ describe('CodexACPAgent - initialize', () => {
     });
 
     it('should not advertise ChatGPT auth when browser auth is disabled', () => {
-        const methodIds = getCodexAuthMethods(undefined, {NO_BROWSER: "1"} as NodeJS.ProcessEnv)
+        const methodIds = getCodexAuthMethods(undefined, {NO_BROWSER: "1", DISPLAY: ":0"} as NodeJS.ProcessEnv)
             .map((method) => method.id);
 
         expect(methodIds).not.toContain("chat-gpt");
         expect(methodIds).toEqual(expect.arrayContaining(["api-key"]));
+    });
+
+    it('should not advertise browser ChatGPT auth on a headless Linux host', () => {
+        const headless = {PATH: "/usr/bin"} as NodeJS.ProcessEnv;
+        expect(browserSignInAvailable(headless, "linux")).toBe(false);
+
+        const methodIds = getCodexAuthMethods({elicitation: {url: {}}}, headless)
+            .map((method) => method.id);
+        expect(methodIds).not.toContain("chat-gpt");
+        expect(methodIds).toEqual(expect.arrayContaining(["api-key", "chat-gpt-device-code"]));
+    });
+
+    it('should advertise browser ChatGPT auth where a browser can open', () => {
+        expect(browserSignInAvailable({DISPLAY: ":0"} as NodeJS.ProcessEnv, "linux")).toBe(true);
+        expect(browserSignInAvailable({WAYLAND_DISPLAY: "wayland-0"} as NodeJS.ProcessEnv, "linux")).toBe(true);
+        expect(browserSignInAvailable({WSL_DISTRO_NAME: "Ubuntu"} as NodeJS.ProcessEnv, "linux")).toBe(true);
+        expect(browserSignInAvailable({} as NodeJS.ProcessEnv, "darwin")).toBe(true);
+        expect(browserSignInAvailable({} as NodeJS.ProcessEnv, "win32")).toBe(true);
     });
 });

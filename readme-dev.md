@@ -10,7 +10,7 @@ Set `CODEX_PATH` to run a different Codex binary; versions other than the one sp
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, or `agent-full-access`.
-- `NO_BROWSER` - hide browser-based ChatGPT auth when set.
+- `NO_BROWSER` - hide browser-based ChatGPT auth when set. Headless Linux hosts (no `DISPLAY`, `WAYLAND_DISPLAY`, or WSL interop) hide it automatically and reject `chat-gpt` requests instead of waiting for a browser callback.
 - `APP_SERVER_LOGS` - directory for adapter logs.
 
 ### Quick start

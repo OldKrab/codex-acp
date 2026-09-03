@@ -43,7 +43,8 @@ CODEX_PATH=/path/to/codex npx -y @openaide/codex-acp
 
 The adapter advertises ACP auth methods during initialization. Clients can authenticate with:
 
-- ChatGPT login. Set `NO_BROWSER=1` to hide this method in remote or browserless environments.
+- ChatGPT login in the host browser. Hidden automatically on headless Linux hosts (no `DISPLAY`, `WAYLAND_DISPLAY`, or WSL interop); set `NO_BROWSER=1` to hide it elsewhere.
+- ChatGPT device code, when the client supports URL elicitation. Use this in remote or browserless environments.
 - API key via `CODEX_API_KEY` or `OPENAI_API_KEY`.
 - A custom OpenAI-compatible gateway, when the client opts in to the gateway auth capability.
 
@@ -56,7 +57,7 @@ The adapter advertises ACP auth methods during initialization. Clients can authe
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `agent`, or `agent-full-access`.
-- `NO_BROWSER` - hide browser-based ChatGPT auth when set.
+- `NO_BROWSER` - hide browser-based ChatGPT auth when set. Headless Linux hosts hide it automatically.
 - `APP_SERVER_LOGS` - directory for adapter logs.
 
 ## Development

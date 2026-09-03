@@ -1,5 +1,7 @@
 import {
     type ApiKeyAuthRequest,
+    BROWSER_SIGN_IN_UNAVAILABLE_MESSAGE,
+    browserSignInAvailable,
     CODEX_API_KEY_ENV_VAR,
     GatewayAuthMethod,
     type GatewayAuthRequest,
@@ -181,6 +183,10 @@ export class CodexAcpClient {
         const accountResponse = await this.codexClient.accountRead({refreshToken: true});
         if (accountResponse.account?.type === "chatgpt") {
             return true;
+        }
+        // Fail fast instead of waiting for a loopback callback that no browser will ever trigger.
+        if (!browserSignInAvailable()) {
+            throw RequestError.invalidRequest(undefined, BROWSER_SIGN_IN_UNAVAILABLE_MESSAGE);
         }
         const loginCompletedPromise = this.awaitNextLoginCompleted();
         const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});

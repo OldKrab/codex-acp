@@ -1,7 +1,7 @@
 // noinspection ES6RedundantAwait
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR, type CodexAuthRequest} from "../../CodexAuthMethod";
+import {BROWSER_SIGN_IN_UNAVAILABLE_MESSAGE, CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR, type CodexAuthRequest} from "../../CodexAuthMethod";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
     createCodexMockTestFixture,
@@ -200,6 +200,22 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             .resolves.toEqual({});
 
         expect(accountReadSpy).toHaveBeenCalledWith({refreshToken: true});
+        expect(accountLoginSpy).not.toHaveBeenCalled();
+    });
+
+    it('should reject browser ChatGPT login on a headless host instead of waiting for a callback', async () => {
+        vi.stubEnv("NO_BROWSER", "1");
+        const chatGptFixture = createCodexMockTestFixture();
+        const codexAppServerClient = chatGptFixture.getCodexAppServerClient();
+        vi.spyOn(codexAppServerClient, "accountRead").mockResolvedValue({
+            account: null,
+            requiresOpenaiAuth: true,
+        });
+        const accountLoginSpy = vi.spyOn(codexAppServerClient, "accountLogin");
+
+        await expect(chatGptFixture.getCodexAcpAgent().authenticate({methodId: "chat-gpt"}))
+            .rejects.toThrow(BROWSER_SIGN_IN_UNAVAILABLE_MESSAGE);
+
         expect(accountLoginSpy).not.toHaveBeenCalled();
     });
 
