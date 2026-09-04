@@ -374,17 +374,32 @@ export class CodexEventHandler {
 
     async handleNotification(notification: ServerNotification) {
         await this.flushPendingErrors();
+        const closingChildren = this.subagents.closingChildSessions(notification);
+        for (const child of closingChildren) {
+            await this.sessionState.asyncTasks.reconcile(child.threadId, child.sessionId);
+        }
         const handledBySubagents = await this.subagents.handle(notification);
         for (const buffered of this.subagents.takeBufferedNotifications()) {
             await this.handleNotification(buffered);
         }
-        if (handledBySubagents) {
-            return;
+        const ignoredBySubagents = !handledBySubagents && this.subagents.shouldIgnore(notification);
+        let updateEvent: UpdateSessionEvent | null | undefined;
+        if (!handledBySubagents
+            && !ignoredBySubagents
+            && notification.method === "item/started"
+            && notification.params.item.type === "commandExecution") {
+            updateEvent = await this.createUpdateEvent(notification);
         }
-        if (this.subagents.shouldIgnore(notification)) {
-            return;
+        if (!handledBySubagents) {
+            await this.sessionState.asyncTasks.handleNotification(
+                notification,
+                this.subagents.notificationSessionId(notification),
+                toolCallTitle(updateEvent),
+            );
         }
-        const updateEvent = await this.createUpdateEvent(notification);
+        if (handledBySubagents) return;
+        if (ignoredBySubagents) return;
+        if (updateEvent === undefined) updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
             await this.session.update(updateEvent, this.subagents.notificationSessionId(notification));
         }
@@ -1337,4 +1352,9 @@ export class CodexEventHandler {
         }
         return createGuardianApprovalReviewToolCall(params);
     }
+}
+
+function toolCallTitle(update: UpdateSessionEvent | null | undefined): string | undefined {
+    if (update?.sessionUpdate !== "tool_call") return undefined;
+    return update.title;
 }

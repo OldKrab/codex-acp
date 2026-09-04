@@ -11,6 +11,10 @@ import {
     LEGACY_GOAL_CONTROL_METHOD,
     type GoalControlRequest,
 } from "./GoalExtension";
+import {
+    ASYNC_TASK_STOP_METHOD,
+    type AsyncTaskStopExtRequest,
+} from "./async-tasks/AsyncTaskExtension";
 
 export {
     AUTH_STATUS_META_KEY,
@@ -74,6 +78,7 @@ export type ExtMethodRequest =
     | LegacySetSessionModelExtRequest
     | SessionSteeringExtRequest
     | GoalControlExtRequest
+    | AsyncTaskStopExtRequest
 
 export function isExtMethodRequest(request: { method: string, params: Record<string, unknown> }): request is ExtMethodRequest {
     return request.method === "authentication/status"
@@ -81,7 +86,8 @@ export function isExtMethodRequest(request: { method: string, params: Record<str
         || request.method === LEGACY_SET_SESSION_MODEL_METHOD
         || request.method === GOAL_CONTROL_METHOD
         || request.method === LEGACY_GOAL_CONTROL_METHOD
-        || request.method === SESSION_STEERING_METHOD;
+        || request.method === SESSION_STEERING_METHOD
+        || request.method === ASYNC_TASK_STOP_METHOD;
 }
 
 /**
