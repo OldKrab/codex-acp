@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.6...openaide-codex-acp-v1.2.0) (2026-09-04)
+
+
+### Features
+
+* sync upstream codex-acp v1.10.0 ([da6e6b3](https://github.com/OldKrab/codex-acp/commit/da6e6b32bb9e02a472b412435b4a121aca580f0c))
+* sync upstream codex-acp v1.10.0 ([8328b15](https://github.com/OldKrab/codex-acp/commit/8328b151e0ccb9843a37f3397d765cd295a9d7cd))
+
+
+### Bug Fixes
+
+* update codex to 0.153.3 ([#476](https://github.com/OldKrab/codex-acp/issues/476)) ([b9f1386](https://github.com/OldKrab/codex-acp/commit/b9f1386e0d14e1322dca5b6574146f8faa6ecea6))
+
 ## [1.1.6](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.5...openaide-codex-acp-v1.1.6) (2026-09-01)
 
 
