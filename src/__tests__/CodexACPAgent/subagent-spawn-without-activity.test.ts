@@ -32,6 +32,13 @@ it.each([false, true])("announces a successful spawn and routes child history (l
         {method: "item/completed", params: {threadId: sessionId, turnId: "turn", completedAtMs: 0,
             item: {...spawn, id: "wait", tool: "wait", prompt: null,
                 agentsStates: {child: {status: "completed", message: "323"}}}}},
+        {method: "item/completed", params: {threadId: sessionId, turnId: "turn", completedAtMs: 0,
+            item: {...spawn, id: "followup", tool: "sendInput", prompt: "Compute 7 * 11",
+                agentsStates: {child: {status: "completed", message: "323"}}}}},
+        {method: "item/agentMessage/delta", params: {threadId: "child", turnId: "followup-turn", itemId: "followup-answer", delta: "77"}},
+        {method: "item/completed", params: {threadId: sessionId, turnId: "turn", completedAtMs: 0,
+            item: {...spawn, id: "followup-wait", tool: "wait", prompt: null,
+                agentsStates: {child: {status: "completed", message: "77"}}}}},
     ]);
     const updates = fixture.getAcpConnectionEvents([])
         .filter(event => event.method === "sessionUpdate").map(event => event.args[0]);
@@ -42,7 +49,13 @@ it.each([false, true])("announces a successful spawn and routes child history (l
         ["child", "user_message_chunk"],
         ["child", "agent_message_chunk"],
         [sessionId, "subagent_state_update"],
+        [sessionId, "subagent_spawned"],
+        ["child", "user_message_chunk"],
+        ["child", "agent_message_chunk"],
+        [sessionId, "subagent_state_update"],
     ]);
     expect(childLifecycle[2].update.content.text).toBe("323");
     expect(childLifecycle[3].update.state).toBe("completed");
+    expect(childLifecycle[6].update.content.text).toBe("77");
+    expect(childLifecycle[7].update.state).toBe("completed");
 });
