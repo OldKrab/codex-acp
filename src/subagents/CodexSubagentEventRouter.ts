@@ -115,11 +115,8 @@ export class CodexSubagentEventRouter {
             if (isRootAgentPath(item.agentPath)) return true;
             if (this.terminalPendingSpawns.has(item.agentThreadId)) return true;
             if (item.kind === "interacted") await this.reopen(item.agentThreadId);
-            let hasNativeRepresentation = this.children.has(item.agentThreadId);
-            if (!hasNativeRepresentation) {
-                await this.materialize(item.agentThreadId, item.agentPath);
-                hasNativeRepresentation = this.children.has(item.agentThreadId);
-            }
+            await this.materialize(item.agentThreadId, item.agentPath);
+            const hasNativeRepresentation = this.children.has(item.agentThreadId);
             if (hasNativeRepresentation && item.kind !== "interrupted") {
                 const prompt = this.causalRootPrompts.get(notification.params.turnId);
                 if (prompt) await this.projectPrompt(item.agentThreadId, prompt.sourceId, prompt.text);
@@ -179,6 +176,15 @@ export class CodexSubagentEventRouter {
                     droppedBufferedNotifications: 0,
                 });
                 representedSpawn = true;
+            }
+        }
+
+        // A completed spawn proves the child identity. Recent Codex versions may
+        // never emit subAgentActivity, so its optional path cannot gate lifecycle,
+        // child output, or permission routing. In-progress spawns still wait.
+        if (item.tool === "spawnAgent" && item.status === "completed") {
+            for (const childSessionId of item.receiverThreadIds) {
+                if (this.pendingSpawns.has(childSessionId)) await this.materialize(childSessionId);
             }
         }
 
@@ -334,11 +340,17 @@ export class CodexSubagentEventRouter {
             : [];
     }
 
-    private async materialize(childSessionId: string, path: string): Promise<void> {
-        if (this.children.has(childSessionId)) return;
+    private async materialize(childSessionId: string, path?: string): Promise<void> {
+        const existing = this.children.get(childSessionId);
+        if (existing) {
+            // Late path metadata helps infer nested parents without re-announcing
+            // or renaming a child whose identity is already visible to the client.
+            if (path) existing.path = normalizeAgentPath(path);
+            return;
+        }
         const pending = this.pendingSpawns.get(childSessionId);
-        const name = nameFromAgentPath(path, fallbackName(childSessionId));
-        const inferredParent = this.parentForPath(path);
+        const name = path ? nameFromAgentPath(path, fallbackName(childSessionId)) : fallbackName(childSessionId);
+        const inferredParent = this.parentForPath(path ?? "/root");
         const parentThreadId = pending?.parentThreadId ?? inferredParent.threadId;
         const parentSessionId = pending?.parentSessionId ?? inferredParent.sessionId;
         const task = pending?.task ?? `Delegated task for ${name}`;
@@ -355,7 +367,7 @@ export class CodexSubagentEventRouter {
             sessionId: childSessionId,
             name,
             task,
-            path: normalizeAgentPath(path),
+            ...(path ? {path: normalizeAgentPath(path)} : {}),
             generation: 1,
         });
         if (pending?.promptSourceId) {

@@ -13,7 +13,7 @@ Subagents require bilateral capability negotiation during `initialize`.
 
 ## Lifecycle events
 
-- The adapter sends `subagent_spawned` before any child output.
+- The adapter sends `subagent_spawned` before any child output. A successful `spawnAgent` announces the child even when Codex emits no `subAgentActivity`; optional activity paths enrich routing but never gate the lifecycle.
 - It uses the child session ID for later messages, thoughts, plans, tools, permissions, and elicitations.
 - It sends one `subagent_state_update` on the immediate parent.
 - The adapter advertises an empty child capability object. It does not support targeted child cancel or close operations.

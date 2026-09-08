@@ -7,7 +7,7 @@ import { createCodexMockTestFixture, createTestModel } from "../acp-test-utils";
 import type { Model, Thread, ThreadGoal } from "../../app-server/v2";
 
 describe("CodexACPAgent - loadSession", () => {
-    it("replays native child history and disconnects an orphan", async () => {
+    it.each(["activity", "collaboration"])("replays native child history and disconnects an orphan from %s", async (source) => {
         const fixture = createCodexMockTestFixture();
         const agent = fixture.getCodexAcpAgent();
         const client = fixture.getCodexAcpClient();
@@ -118,6 +118,23 @@ describe("CodexACPAgent - loadSession", () => {
                 questions: null,
             },
         ]);
+        if (source === "collaboration") {
+            const seen = new Set<string>();
+            for (const turn of root.turns) {
+                turn.items = turn.items.map(item => {
+                    if (item.type !== "subAgentActivity") return item;
+                    const started = item.kind === "started";
+                    const tool = started ? (seen.has(item.agentThreadId) ? "sendInput" : "spawnAgent") : "wait";
+                    seen.add(item.agentThreadId);
+                    return {
+                        type: "collabAgentToolCall", id: item.id, tool, status: "completed",
+                        senderThreadId: root.id, receiverThreadIds: [item.agentThreadId],
+                        prompt: started ? "Delegated task" : null, model: null, reasoningEffort: null,
+                        agentsStates: {[item.agentThreadId]: {status: started ? "running" : "completed", message: null}},
+                    };
+                });
+            }
+        }
         const firstChildTurn = child.turns[0]!;
         child.turns.push({
             id: "turn-child-history-2",

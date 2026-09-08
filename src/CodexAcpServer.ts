@@ -118,7 +118,7 @@ import {
     type SubagentAwareSessionCapabilities,
 } from "./subagents/AcpSubagents";
 import {CodexSubagentEventRouter} from "./subagents/CodexSubagentEventRouter";
-import {nameFromAgentPath} from "./subagents/CodexAgentPath";
+import {streamNativeThreadHistory} from "./subagents/CodexSubagentHistory";
 import {
     fromAccount,
     fromAccountUpdated,
@@ -1982,10 +1982,15 @@ export class CodexAcpServer {
         const sessionState = this.getSessionState(sessionId);
         await this.publishThreadHistoryTitle(session, sessionState, thread);
         if (clientSupportsSubagents(this.clientCapabilities)) {
-            await this.streamNativeThreadHistory(
+            await streamNativeThreadHistory(
+                {
+                    connection: this.connection,
+                    readThread: id => this.codexAcpClient.readSessionThread(id),
+                    createUpdates: item => this.createHistoryUpdates(item, sessionState),
+                    recover: (id, childSessionId, commandIds) => sessionState.asyncTasks.recover(id, childSessionId, commandIds),
+                },
                 sessionId,
                 thread,
-                sessionState,
                 new Set([sessionId]),
                 new Map([[sessionId, thread]]),
             );
@@ -2009,111 +2014,6 @@ export class CodexAcpServer {
             : threadUpdates;
         for (const update of updates) {
             await session.update(update);
-        }
-    }
-
-    private async streamNativeThreadHistory(
-        sessionId: string,
-        thread: Thread,
-        sessionState: SessionState,
-        ancestry: Set<string>,
-        threadCache: Map<string, Thread | null>,
-    ): Promise<void> {
-        const session = new ACPSessionConnection(this.connection, sessionId);
-        const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean}>();
-        for (const turn of thread.turns) {
-            for (const item of turn.items) {
-                if (item.type === "subAgentActivity") {
-                    const activityKind = item.kind as string;
-                    if (activityKind === "started") {
-                        const previous = announced.get(item.agentThreadId);
-                        if (previous && !previous.terminal) continue;
-                        const generation = (previous?.generation ?? 0) + 1;
-                        const childSessionId = item.agentThreadId;
-                        const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
-                        await session.update({
-                            sessionUpdate: "subagent_spawned",
-                            subagentSessionId: childSessionId,
-                            name,
-                            task: `Delegated task for ${name}`,
-                            capabilities: {},
-                        });
-                        announced.set(item.agentThreadId, {generation, sessionId: childSessionId, terminal: false});
-                        if (!ancestry.has(item.agentThreadId)) {
-                            let child = threadCache.get(item.agentThreadId);
-                            if (child === undefined) {
-                                try {
-                                    child = await this.codexAcpClient.readSessionThread(item.agentThreadId);
-                                    threadCache.set(item.agentThreadId, child);
-                                }
-                                catch (error) {
-                                    threadCache.set(item.agentThreadId, null);
-                                    logger.error(`Failed to read subagent history ${item.agentThreadId}`, error);
-                                    child = null;
-                                }
-                            }
-                            const childTurn = child?.turns[generation - 1];
-                            if (child && childTurn) {
-                                await this.streamNativeThreadHistory(
-                                    childSessionId,
-                                    {...child, turns: [childTurn]},
-                                    sessionState,
-                                    new Set([...ancestry, item.agentThreadId]),
-                                    threadCache,
-                                );
-                                try {
-                                    await sessionState.asyncTasks.recover(
-                                        item.agentThreadId,
-                                        childSessionId,
-                                        commandItemIds(childTurn.items),
-                                    );
-                                } catch (error) {
-                                    logger.error(`Failed to restore background terminals for ${item.agentThreadId}`, error);
-                                }
-                            }
-                        }
-                    }
-                    else if (activityKind === "completed" || activityKind === "interrupted") {
-                        const child = announced.get(item.agentThreadId);
-                        if (!child) {
-                            const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
-                            await session.update({
-                                sessionUpdate: "subagent_spawned",
-                                subagentSessionId: item.agentThreadId,
-                                name,
-                                task: `Delegated task for ${name}`,
-                                capabilities: {},
-                            });
-                            announced.set(item.agentThreadId, {
-                                generation: 1,
-                                sessionId: item.agentThreadId,
-                                terminal: false,
-                            });
-                            continue;
-                        }
-                        if (child.terminal) continue;
-                        await session.update({
-                            sessionUpdate: "subagent_state_update",
-                            subagentSessionId: child.sessionId,
-                            state: activityKind === "completed" ? "completed" : "cancelled",
-                        });
-                        child.terminal = true;
-                    }
-                    continue;
-                }
-                if (item.type === "collabAgentToolCall") continue;
-                for (const update of await this.createHistoryUpdates(item, sessionState)) {
-                    await session.update(update);
-                }
-            }
-        }
-        for (const child of announced.values()) {
-            if (child.terminal) continue;
-            await session.update({
-                sessionUpdate: "subagent_state_update",
-                subagentSessionId: child.sessionId,
-                state: "disconnected",
-            });
         }
     }
 
@@ -3393,11 +3293,6 @@ function mergeHistoryUpdates(
     return merged;
 }
 
-function commandItemIds(items: ThreadItem[]): Set<string> {
-    return new Set(items
-        .filter((item): item is Extract<ThreadItem, {type: "commandExecution"}> => item.type === "commandExecution")
-        .map(item => item.id));
-}
 
 function historyUpdateKey(update: UpdateSessionEvent): string | null {
     switch (update.sessionUpdate) {
