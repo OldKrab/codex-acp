@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.2.0...openaide-codex-acp-v1.2.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* announce subagents without activity metadata ([#27](https://github.com/OldKrab/codex-acp/issues/27)) ([3635a8b](https://github.com/OldKrab/codex-acp/commit/3635a8b535e4bfe9300dd73b68f0ac51f819f068))
+
 ## [1.2.0](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.1.6...openaide-codex-acp-v1.2.0) (2026-09-04)
 
 
