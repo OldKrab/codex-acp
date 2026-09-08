@@ -1335,7 +1335,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         expect(terminal?.args[0].update.state).toBe("cancelled");
     });
 
-    it("waits for a pending spawn without publishing fallback identity and suppresses late activity", async () => {
+    it("announces a completed pending spawn once and suppresses late activity", async () => {
         await initializeNativeSubagents();
         const appServer = mockFixture.getCodexAppServerClient();
         const turn = {id: "turn-1", items: [], status: "inProgress" as const, error: null};
@@ -1405,7 +1405,10 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             .filter(event => event.method === "sessionUpdate")
             .map(event => event.args[0].update)
             .filter(update => update.subagentSessionId === "child-without-activity");
-        expect(lifecycle).toEqual([]);
+        expect(lifecycle.map(update => update.sessionUpdate)).toEqual([
+            "subagent_spawned", "subagent_state_update",
+        ]);
+        expect(lifecycle[1].state).toBe("completed");
     });
 
     it("reopens a pending child that terminated before its first activity", async () => {
