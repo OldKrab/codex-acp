@@ -128,6 +128,13 @@ export class CodexSubagentEventRouter {
         }
         if (item.type !== "collabAgentToolCall") return false;
 
+        // sendInput acknowledges delivery, but agentsStates may still describe
+        // the previous completed turn. Reopen from that acknowledgement and let
+        // subsequent child/wait events finish the new generation.
+        const acceptedInput = item.tool === "sendInput" && item.status === "completed";
+        if (acceptedInput) {
+            for (const childThreadId of item.receiverThreadIds) await this.reopen(childThreadId);
+        }
         if (item.tool === "resumeAgent" || item.tool === "sendInput") {
             for (const [childThreadId, state] of Object.entries(item.agentsStates)) {
                 if (state?.status === "running" || state?.status === "pendingInit") {
@@ -189,6 +196,7 @@ export class CodexSubagentEventRouter {
         }
 
         for (const [childSessionId, state] of Object.entries(item.agentsStates)) {
+            if (acceptedInput && item.receiverThreadIds.includes(childSessionId)) continue;
             const terminalState = state && terminalStateOf(state.status);
             if (!terminalState) continue;
             if (this.children.has(childSessionId)) await this.finish(childSessionId, terminalState);
