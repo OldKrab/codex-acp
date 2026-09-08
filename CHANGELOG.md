@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.2.1...openaide-codex-acp-v1.2.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* reopen subagents when follow-up carries stale completed state ([#29](https://github.com/OldKrab/codex-acp/issues/29)) ([1f00df5](https://github.com/OldKrab/codex-acp/commit/1f00df5e94b7821e1b61bee7b80cffb8b0bdf062))
+
 ## [1.2.1](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.2.0...openaide-codex-acp-v1.2.1) (2026-09-08)
 
 
