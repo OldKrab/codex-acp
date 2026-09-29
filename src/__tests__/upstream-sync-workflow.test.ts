@@ -69,6 +69,8 @@ describe("upstream update branch", () => {
       packageLock(upstreamPackage.name, upstreamPackage.version, upstreamPackage.dependencies),
     );
     write(repository, ".github/workflows/publish.yml", "name: Upstream publish v1\n");
+    write(repository, "CHANGELOG.md", "Upstream releases\n");
+    write(repository, "docs/RELEASES.md", "Upstream publishing\n");
     writeJson(repository, ".release-please-manifest.json", { ".": "1.0.0" });
     write(repository, "src/product.ts", "export const product = 1;\n");
     git(repository, "add", ".");
@@ -99,6 +101,8 @@ describe("upstream update branch", () => {
       packageLock(forkPackage.name, forkPackage.version, forkPackage.dependencies),
     );
     write(repository, ".github/workflows/publish.yml", "name: OpenAIDE publish\n");
+    write(repository, "CHANGELOG.md", "Fork releases\n");
+    write(repository, "docs/RELEASES.md", "Fork publishing\n");
     writeJson(repository, ".release-please-manifest.json", { ".": "1.0.0" });
     git(repository, "add", ".");
     git(repository, "commit", "-m", "fork release metadata");
@@ -124,6 +128,8 @@ describe("upstream update branch", () => {
       ),
     );
     write(repository, ".github/workflows/publish.yml", "name: Upstream publish v2\n");
+    write(repository, "CHANGELOG.md", "Upstream v2 releases\n");
+    write(repository, "docs/RELEASES.md", "Upstream v2 publishing\n");
     writeJson(repository, ".release-please-manifest.json", { ".": "2.0.0" });
     write(repository, "src/product.ts", "export const product = 2;\n");
     git(repository, "add", ".");
@@ -179,5 +185,48 @@ describe("upstream update branch", () => {
       .toEqual({ ".": "1.0.0" });
     expect(readFileSync(path.join(repository, "src/product.ts"), "utf8"))
       .toBe("export const product = 2;\n");
+    expect(readFileSync(path.join(repository, "CHANGELOG.md"), "utf8")).toBe("Fork releases\n");
+    expect(readFileSync(path.join(repository, "docs/RELEASES.md"), "utf8")).toBe("Fork publishing\n");
+    expect(git(repository, "show", "-s", "--format=%(trailers:key=Upstream-Sync-Base,valueonly)"))
+      .toBe(git(repository, "rev-parse", "main"));
+    expect(git(repository, "show", "-s", "--format=%(trailers:key=Upstream-Sync-Release,valueonly)"))
+      .toBe(release);
+  });
+
+  test.each(["source", "dependency"])("reports a %s conflict for a draft PR without leaving a partial merge", (conflict) => {
+    const repository = mkdtempSync(path.join(tmpdir(), "codex-acp-upstream-conflict-"));
+    temporaryRepositories.push(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Upstream Sync Test");
+    git(repository, "config", "user.email", "upstream-sync@example.invalid");
+    const metadata = {name: "adapter", version: "1.0.0", dependencies: {alpha: "1.0.0"}};
+    writeJson(repository, "package.json", metadata);
+    writeJson(repository, "package-lock.json", packageLock(metadata.name, metadata.version, metadata.dependencies));
+    write(repository, "src/product.ts", "base\n");
+    write(repository, ".github/workflows/publish.yml", "name: Publish\n");
+    writeJson(repository, ".release-please-manifest.json", {".": "1.0.0"});
+    git(repository, "add", ".");
+    git(repository, "commit", "-m", "base");
+    const base = git(repository, "rev-parse", "HEAD");
+
+    for (const [branch, version] of [["fork", "1.1.0"], ["upstream", "2.0.0"]] as const) {
+      git(repository, "switch", "--create", branch, base);
+      if (conflict === "source") write(repository, "src/product.ts", `${branch}\n`);
+      else writeJson(repository, "package.json", {...metadata, dependencies: {alpha: version}});
+      git(repository, "add", ".");
+      git(repository, "commit", "-m", `${branch} changes`);
+    }
+    const release = git(repository, "rev-parse", "HEAD");
+    git(repository, "switch", "fork");
+    const fork = git(repository, "rev-parse", "HEAD");
+    const result = spawnSync(process.execPath,
+      [prepareScript, "--release", release, "--tag", "v2.0.0", "--branch", "shushakov/update"],
+      {cwd: repository, encoding: "utf8"});
+
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toContain('"errorClass":"merge_conflict"');
+    expect(git(repository, "rev-parse", "HEAD")).toBe(fork);
+    expect(git(repository, "status", "--porcelain")).toBe("");
+    expect(spawnSync("git", ["rev-parse", "--verify", "MERGE_HEAD"], {cwd: repository}).status).not.toBe(0);
   });
 });

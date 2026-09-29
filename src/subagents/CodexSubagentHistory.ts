@@ -1,4 +1,4 @@
-import type {Thread, ThreadItem} from "../app-server/v2";
+import type {ThreadItem} from "../app-server/v2";
 import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent} from "../ACPSessionConnection";
 import {logger} from "../Logger";
 import {nameFromAgentPath} from "./CodexAgentPath";
@@ -6,23 +6,25 @@ import type {SubagentState} from "./AcpSubagents";
 
 type HistoryContext = {
     connection: AcpClientConnection;
-    readThread(id: string): Promise<Thread>;
+    readTurnItems(id: string, index: number): Promise<AsyncIterable<ThreadItem[]> | null>;
+    ensureOpen(): void;
     createUpdates(item: ThreadItem): Promise<UpdateSessionEvent[]>;
     recover(id: string, sessionId: string, commandIds: Set<string>): Promise<void>;
 };
 
-/** Replays each announced generation before its terminal state, caching child reads. */
+/** Replays paged generations before their terminal state, preserving the native child identity. */
 export async function streamNativeThreadHistory(
     context: HistoryContext,
     sessionId: string,
-    thread: Thread,
+    itemPages: AsyncIterable<ThreadItem[]>,
     ancestry: Set<string>,
-    threadCache: Map<string, Thread | null>,
+    unreadableChildren: Set<string>,
 ): Promise<void> {
     const session = new ACPSessionConnection(context.connection, sessionId);
     const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean}>();
-    for (const turn of thread.turns) {
-        for (const item of turn.items) {
+    for await (const items of itemPages) {
+        for (const item of items) {
+            context.ensureOpen();
             const events = lifecycleEvents(item);
             for (const event of events) {
                 if (!event.agentThreadId.trim() || ancestry.has(event.agentThreadId)) continue;
@@ -42,32 +44,30 @@ export async function streamNativeThreadHistory(
                         capabilities: {},
                     });
                     announced.set(event.agentThreadId, {generation, sessionId: childSessionId, terminal: false});
-                    let child = threadCache.get(event.agentThreadId);
-                    if (child === undefined) {
+                    if (!unreadableChildren.has(event.agentThreadId)) {
+                        const commandIds = new Set<string>();
                         try {
-                            child = await context.readThread(event.agentThreadId);
-                            threadCache.set(event.agentThreadId, child);
+                            const childItems = await context.readTurnItems(event.agentThreadId, generation - 1);
+                            if (!childItems) continue;
+                            await streamNativeThreadHistory(
+                                context,
+                                childSessionId,
+                                withCommandIds(childItems, commandIds),
+                                new Set([...ancestry, event.agentThreadId]),
+                                unreadableChildren,
+                            );
                         }
                         catch (error) {
-                            threadCache.set(event.agentThreadId, null);
+                            // Closing the parent cancels the load, including any lazy child page.
+                            context.ensureOpen();
+                            unreadableChildren.add(event.agentThreadId);
                             logger.error(`Failed to read subagent history ${event.agentThreadId}`, error);
-                            child = null;
                         }
-                    }
-                    const childTurn = child?.turns[generation - 1];
-                    if (child && childTurn) {
-                        await streamNativeThreadHistory(
-                            context,
-                            childSessionId,
-                            {...child, turns: [childTurn]},
-                            new Set([...ancestry, event.agentThreadId]),
-                            threadCache,
-                        );
                         try {
                             await context.recover(
                                 event.agentThreadId,
                                 childSessionId,
-                                commandItemIds(childTurn.items),
+                                commandIds,
                             );
                         } catch (error) {
                             logger.error(`Failed to restore background terminals for ${event.agentThreadId}`, error);
@@ -100,7 +100,8 @@ export async function streamNativeThreadHistory(
                     child.terminal = true;
                 }
             }
-            if (item.type === "collabAgentToolCall" || item.type === "subAgentActivity") continue;
+            // Control calls remain tools, as they are during live routing; only spawns are replaced.
+            if (item.type === "subAgentActivity" || (item.type === "collabAgentToolCall" && item.tool === "spawnAgent")) continue;
             for (const update of await context.createUpdates(item)) {
                 await session.update(update);
             }
@@ -134,7 +135,7 @@ function lifecycleEvents(item: ThreadItem): LifecycleEvent[] {
     }
     if (item.type !== "collabAgentToolCall") return [];
     const events: LifecycleEvent[] = [];
-    if (item.status === "completed" && ["spawnAgent", "sendInput", "resumeAgent"].includes(item.tool)) {
+    if (item.status === "completed" && ["spawnAgent", "sendInput", "resumeAgent", "followupTask"].includes(item.tool)) {
         for (const id of item.receiverThreadIds) {
             events.push({kind: "started", agentThreadId: id, ...(item.prompt?.trim() ? {task: item.prompt.trim()} : {})});
         }
@@ -151,8 +152,12 @@ function lifecycleEvents(item: ThreadItem): LifecycleEvent[] {
     return events;
 }
 
-function commandItemIds(items: ThreadItem[]): Set<string> {
-    return new Set(items
-        .filter((item): item is Extract<ThreadItem, {type: "commandExecution"}> => item.type === "commandExecution")
-        .map(item => item.id));
+/** Collect only command identities while consuming one page at a time. */
+async function* withCommandIds(pages: AsyncIterable<ThreadItem[]>, commandIds: Set<string>): AsyncGenerator<ThreadItem[]> {
+    for await (const items of pages) {
+        for (const item of items) {
+            if (item.type === "commandExecution") commandIds.add(item.id);
+        }
+        yield items;
+    }
 }

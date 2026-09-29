@@ -126,6 +126,7 @@ describe("CodexACPAgent - list sessions", () => {
             sessionId: "sess-1",
             parentThreadId: null,
             threadSource: null,
+            originator: null,
             forkedFromId: null,
             preview: "First session",
             ephemeral: false,
@@ -155,6 +156,7 @@ describe("CodexACPAgent - list sessions", () => {
             sessionId: "sess-2",
             parentThreadId: null,
             threadSource: null,
+            originator: null,
             forkedFromId: null,
             preview: "Other session",
             ephemeral: false,
@@ -204,10 +206,25 @@ describe("CodexACPAgent - list sessions", () => {
                 "appServer",
                 "unknown",
             ],
+            // Codex answers from the state DB instead of scanning every rollout file.
+            useStateDbOnly: true,
         }));
         await expect(JSON.stringify(response, null, 2)).toMatchFileSnapshot(
             "data/list-sessions.json"
         );
+    });
+
+    it("sends one thread/list request for an empty page", async () => {
+        const fixture = createCodexMockTestFixture();
+        const codexAppServerClient = fixture.getCodexAppServerClient();
+        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        codexAppServerClient.threadList = vi.fn().mockResolvedValue({data: [], nextCursor: null});
+        codexAppServerClient.threadLoadedList = vi.fn().mockResolvedValue({data: [], nextCursor: null});
+
+        const response = await fixture.getCodexAcpAgent().listSessions({cwd: "/repo/project", cursor: null});
+
+        expect(response.sessions).toEqual([]);
+        expect(codexAppServerClient.threadList).toHaveBeenCalledTimes(1);
     });
 
     it("forwards Windows cwd filters to the App Server", async () => {
@@ -223,6 +240,7 @@ describe("CodexACPAgent - list sessions", () => {
             sessionId: "sess-win",
             parentThreadId: null,
             threadSource: null,
+            originator: null,
             forkedFromId: null,
             preview: "Windows session",
             ephemeral: false,
@@ -303,6 +321,7 @@ describe("CodexACPAgent - list sessions", () => {
             sessionId: "sess-1",
             parentThreadId: null,
             threadSource: null,
+            originator: null,
             forkedFromId: null,
             preview: "Preview text",
             ephemeral: false,
@@ -365,6 +384,7 @@ describe("CodexACPAgent - list sessions", () => {
                 availabilityNux: null,
                 modelSpecialty: null,
                 multiAgentVersion: null,
+                availableAccessPrograms: null,
                 displayName: "gpt-5",
                 description: "test model",
                 hidden: false,
@@ -386,6 +406,7 @@ describe("CodexACPAgent - list sessions", () => {
             sessionId: "sess-1",
             parentThreadId: null,
             threadSource: null,
+            originator: null,
             forkedFromId: null,
             preview: "First session",
             ephemeral: false,
@@ -437,6 +458,7 @@ function createThread(id: string, cwd: string): Thread {
         sessionId: id,
         parentThreadId: null,
         threadSource: null,
+        originator: null,
         forkedFromId: null,
         preview: `Session ${id}`,
         ephemeral: false,
