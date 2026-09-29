@@ -3,7 +3,9 @@ import {ACPSessionConnection} from "../../ACPSessionConnection";
 import {CodexSubagentEventRouter} from "../../subagents/CodexSubagentEventRouter";
 import {createCodexMockTestFixture, createTestSessionState, setupPromptAndSendNotifications} from "../acp-test-utils";
 
-it.each([false, true])("announces a successful spawn and routes child history (late activity: %s)", async (lateActivity) => {
+it.each([false, true].flatMap(lateActivity =>
+    (["sendInput", "followupTask"] as const).map(tool => ({lateActivity, tool})),
+))("routes child history with stale completed state ($tool, late activity: $lateActivity)", async ({lateActivity, tool}) => {
     const fixture = createCodexMockTestFixture();
     const sessionId = "parent";
     await fixture.getCodexAcpAgent().initialize({
@@ -12,7 +14,7 @@ it.each([false, true])("announces a successful spawn and routes child history (l
     });
     const state = createTestSessionState({sessionId});
     state.subagents = new CodexSubagentEventRouter(sessionId, true,
-        new ACPSessionConnection(fixture.getAcpConnection(), sessionId));
+        new ACPSessionConnection(fixture.getAcpConnection(), sessionId), () => {});
     const spawn = {
         type: "collabAgentToolCall" as const, id: "spawn", tool: "spawnAgent" as const,
         status: "completed" as const, senderThreadId: sessionId, receiverThreadIds: ["child"],
@@ -33,7 +35,7 @@ it.each([false, true])("announces a successful spawn and routes child history (l
             item: {...spawn, id: "wait", tool: "wait", prompt: null,
                 agentsStates: {child: {status: "completed", message: "323"}}}}},
         {method: "item/completed", params: {threadId: sessionId, turnId: "turn", completedAtMs: 0,
-            item: {...spawn, id: "followup", tool: "sendInput", prompt: "Compute 7 * 11",
+            item: {...spawn, id: "followup", tool, prompt: "Compute 7 * 11",
                 agentsStates: {child: {status: "completed", message: "323"}}}}},
         {method: "item/agentMessage/delta", params: {threadId: "child", turnId: "followup-turn", itemId: "followup-answer", delta: "77"}},
         {method: "item/completed", params: {threadId: sessionId, turnId: "turn", completedAtMs: 0,
