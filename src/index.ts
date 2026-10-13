@@ -10,12 +10,26 @@ import {CodexAcpClient} from "./CodexAcpClient";
 import {CodexAppServerClient} from "./CodexAppServerClient";
 import packageJson from "../package.json";
 import {logger} from "./Logger";
+import {CodexAppServerSupervisor} from "./app-server-recovery/CodexAppServerSupervisor";
 import {runLoginCommand} from "./login";
 import {runCodexCli} from "./CodexCli";
+import {prepareCodexHookConfig} from "./CodexHookConfig";
+import {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD} from "./CodexHookTrust";
 import {
     GOAL_CONTROL_METHOD, LEGACY_SET_SESSION_MODEL_METHOD,
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
+import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
+import {
+    SESSION_ARCHIVE_METHOD,
+    SESSION_LIST_SUBSCRIBE_METHOD,
+    SESSION_LIST_UNSUBSCRIBE_METHOD,
+    SESSION_RENAME_METHOD,
+    SESSION_UNARCHIVE_METHOD,
+    sessionArchiveParamsParser,
+    sessionListSubscriptionParamsParser,
+    sessionRenameParamsParser,
+} from "./SessionIndex";
 
 const emptyExtensionParamsParser = z.preprocess(
     (params) => params ?? {},
@@ -43,6 +57,17 @@ const goalControlParamsParser = z.discriminatedUnion("action", [
         action: z.enum(["pause", "resume", "clear"]),
     }).passthrough(),
 ]);
+
+const asyncTaskStopParamsParser = z.object({
+    sessionId: z.string().trim().min(1),
+    asyncTaskId: z.string().trim().min(1),
+}).passthrough();
+
+const hooksListParamsParser = z.object({cwd: z.string().trim().min(1)});
+const hooksTrustParamsParser = z.object({
+    cwd: z.string().trim().min(1),
+    hooks: z.array(z.object({key: z.string().min(1), currentHash: z.string().min(1)})).min(1),
+});
 
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);
@@ -75,6 +100,7 @@ function startAcpServer() {
     const authRequestString = process.env["DEFAULT_AUTH_REQUEST"];
     const modelProvider = process.env["MODEL_PROVIDER"];
     const config = configString ? JSON.parse(configString) : undefined;
+    const hookConfig = prepareCodexHookConfig(config);
     const parsedAuthRequest = authRequestString ? JSON.parse(authRequestString) : undefined;
     const defaultAuthRequest = parsedAuthRequest && isCodexAuthRequest(parsedAuthRequest) ? parsedAuthRequest : undefined;
 
@@ -89,29 +115,27 @@ function startAcpServer() {
     });
 
     const codexProcessState: CodexProcessState = {
-        connection: startCodexConnection(codexPath),
+        // The supervisor disposes the connection itself, after the last output of the process was read.
+        connection: startCodexConnection(codexPath, undefined, hookConfig.appServerStartupArgs, {disposeOnExit: false}),
         codexPath,
-        config,
+        config: hookConfig.sessionConfig,
+        appServerStartupArgs: hookConfig.appServerStartupArgs,
         modelProvider,
         stderr: "",
     };
+    const supervisor = new CodexAppServerSupervisor(codexProcessState);
+    codexProcessState.supervisor = supervisor;
 
     process.stdin.on("close", () => {
-        codexProcessState.connection.process.stdin.end();
-        // Kill the codex process if it doesn't exit naturally
-        setTimeout(() => {
-            if (!codexProcessState.connection.process.killed) {
-                logger.log("Codex still running 2s after stdin closed; terminating process");
-                codexProcessState.connection.process.kill();
-            }
-        }, 2000);
+        // Ends the stdin of the app-server, sends SIGTERM if it is still running 2 s later, and never restarts it.
+        supervisor.shutdown();
     });
 
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
     function createAgent(connection: acp.AgentContext): CodexAcpServer {
         const appServerClient = new CodexAppServerClient(codexProcessState.connection.connection);
-        const codexClient = new CodexAcpClient(appServerClient, config, modelProvider);
+        const codexClient = new CodexAcpClient(appServerClient, hookConfig.sessionConfig, modelProvider);
         return new CodexAcpServer(
             connection,
             codexClient,
@@ -135,6 +159,7 @@ function startAcpServer() {
             const agent = createAgent(connection.client);
             codexAcpServer = agent;
             connection.signal.addEventListener("abort", () => {
+                agent.sessionIndex.dispose();
                 if (codexAcpServer === agent) {
                     codexAcpServer = null;
                 }
@@ -143,6 +168,7 @@ function startAcpServer() {
         .onRequest(acp.methods.agent.initialize, (ctx) => getAgent().initialize(ctx.params))
         .onRequest(acp.methods.agent.session.new, (ctx) => getAgent().newSession(ctx.params))
         .onRequest(acp.methods.agent.session.load, (ctx) => getAgent().loadSession(ctx.params))
+        .onRequest(acp.methods.agent.session.fork, (ctx) => getAgent().forkSession(ctx.params))
         .onRequest(acp.methods.agent.session.list, (ctx) => getAgent().listSessions(ctx.params))
         .onRequest(acp.methods.agent.session.delete, (ctx) => getAgent().deleteSession(ctx.params))
         .onRequest(acp.methods.agent.session.resume, (ctx) => getAgent().resumeSession(ctx.params))
@@ -160,6 +186,14 @@ function startAcpServer() {
         .onRequest("authentication/logout", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/logout", ctx.params))
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))
+        .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
+        .onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd))
+        .onRequest(CODEX_HOOKS_TRUST_METHOD, hooksTrustParamsParser, (ctx) => getAgent().trustHooks(ctx.params.cwd, ctx.params.hooks))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params))
+        .onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent().sessionIndex.rename(ctx.params))
+        .onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, true))
+        .onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, false))
+        .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
+        .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params))
         .connect(acpJsonStream);
 }

@@ -20,6 +20,8 @@ describe("Model filtering", () => {
                 upgradeInfo: null,
                 availabilityNux: null,
                 modelSpecialty: null,
+                multiAgentVersion: null,
+                availableAccessPrograms: null,
                 displayName: "GPT-5.2",
                 description: "Allowed by id.",
                 hidden: false,
@@ -39,6 +41,8 @@ describe("Model filtering", () => {
                 upgradeInfo: null,
                 availabilityNux: null,
                 modelSpecialty: null,
+                multiAgentVersion: null,
+                availableAccessPrograms: null,
                 displayName: "gpt-5.2",
                 description: "Allowed",
                 hidden: false,
@@ -58,6 +62,8 @@ describe("Model filtering", () => {
                 upgradeInfo: null,
                 availabilityNux: null,
                 modelSpecialty: null,
+                multiAgentVersion: null,
+                availableAccessPrograms: null,
                 displayName: "Other",
                 description: "Allowed by id.",
                 hidden: false,
@@ -77,6 +83,8 @@ describe("Model filtering", () => {
                 upgradeInfo: null,
                 availabilityNux: null,
                 modelSpecialty: null,
+                multiAgentVersion: null,
+                availableAccessPrograms: null,
                 displayName: "gpt-4o",
                 description: "Allowed.",
                 hidden: false,
@@ -96,6 +104,8 @@ describe("Model filtering", () => {
                 upgradeInfo: null,
                 availabilityNux: null,
                 modelSpecialty: null,
+                multiAgentVersion: null,
+                availableAccessPrograms: null,
                 displayName: "gpt-5.3-codex",
                 description: "Codex suffix lowercased.",
                 hidden: false,
@@ -115,6 +125,8 @@ describe("Model filtering", () => {
                 upgradeInfo: null,
                 availabilityNux: null,
                 modelSpecialty: null,
+                multiAgentVersion: null,
+                availableAccessPrograms: null,
                 displayName: "gpt-5.4-mini",
                 description: "Mini suffix lowercased.",
                 hidden: false,
@@ -129,7 +141,7 @@ describe("Model filtering", () => {
             },
         ];
 
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId: "session-id",
             currentModelId: "gpt-5.2[medium]",
