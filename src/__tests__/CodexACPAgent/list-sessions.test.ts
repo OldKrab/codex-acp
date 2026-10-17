@@ -22,7 +22,7 @@ describe("CodexACPAgent - list sessions", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
 
         const matchingThread = createThread("sess-project", "/repo/project");
         const unrelatedThread = createThread("sess-other", "/repo/other");
@@ -55,7 +55,7 @@ describe("CodexACPAgent - list sessions", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAppServerClient.threadList = vi.fn()
             .mockResolvedValueOnce({
                 data: [createThread("sess-newer", "/repo/project")],
@@ -98,7 +98,7 @@ describe("CodexACPAgent - list sessions", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAppServerClient.threadList = vi.fn().mockResolvedValue({
             data: [],
             nextCursor: null,
@@ -119,7 +119,7 @@ describe("CodexACPAgent - list sessions", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
 
         const threadA: Thread = {
             id: "sess-1",
@@ -217,7 +217,7 @@ describe("CodexACPAgent - list sessions", () => {
     it("sends one thread/list request for an empty page", async () => {
         const fixture = createCodexMockTestFixture();
         const codexAppServerClient = fixture.getCodexAppServerClient();
-        fixture.getCodexAcpClient().authRequired = vi.fn().mockResolvedValue(false);
+        fixture.getCodexAcpClient().readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
         codexAppServerClient.threadList = vi.fn().mockResolvedValue({data: [], nextCursor: null});
         codexAppServerClient.threadLoadedList = vi.fn().mockResolvedValue({data: [], nextCursor: null});
 
@@ -233,7 +233,7 @@ describe("CodexACPAgent - list sessions", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
 
         const matchingThread: Thread = {
             id: "sess-win",
@@ -314,7 +314,7 @@ describe("CodexACPAgent - list sessions", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        codexAcpClient.authRequired = vi.fn().mockResolvedValue(false);
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
 
         const thread: Thread = {
             id: "sess-1",
@@ -368,7 +368,7 @@ describe("CodexACPAgent - list sessions", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const codexAppServerClient = fixture.getCodexAppServerClient();
 
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({
             account: null,
             requiresOpenaiAuth: false,
