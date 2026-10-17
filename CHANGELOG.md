@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v2.0.0...openaide-codex-acp-v2.1.0) (2026-10-17)
+
+
+### Features
+
+* sync upstream v2.2.2 ([#35](https://github.com/OldKrab/codex-acp/issues/35)) ([a107fd2](https://github.com/OldKrab/codex-acp/commit/a107fd2a1f7366233bd7c502db415ac01b32b2df))
+
 ## [2.0.0](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v1.2.2...openaide-codex-acp-v2.0.0) (2026-09-29)
 
 
