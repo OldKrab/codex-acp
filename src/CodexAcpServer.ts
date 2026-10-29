@@ -196,6 +196,7 @@ import {
 } from "./AuthStatusMeta";
 import {randomUUID} from "node:crypto";
 import {TitleGenerator} from "./TitleGenerator";
+import {PromptSuggestionGenerator, promptSuggestionsEnabled, promptSuggestionsMeta} from "./PromptSuggestionGenerator";
 import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
@@ -285,6 +286,8 @@ export interface SessionState extends SessionIndexTitleState {
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
     titleGen?: TitleGenerator;
+    /** Predicts the follow-up prompt of a finished turn; set for AIR clients only. */
+    promptSuggestions?: PromptSuggestionGenerator | undefined;
     subagents: SubagentEventRouter;
     subagentTransition?: Promise<void>;
     asyncTasks: CodexBackgroundTerminalTasks;
@@ -1364,6 +1367,7 @@ export class CodexAcpServer {
             () => sessionState.sessionTitleSource,
             this.sessionIndex.titleWriter(sessionId),
         );
+        sessionState.promptSuggestions = this.createPromptSuggestions(sessionState);
         this.installSessionState(sessionState);
         AcpV2Connection.of(this.connection)?.restoreForegroundState(sessionId, sessionMetadata.threadStatus?.type === "active");
         this.recovery?.markLoaded(sessionState, openGeneration);
@@ -1551,7 +1555,10 @@ export class CodexAcpServer {
     }
 
     private installSessionState(sessionState: SessionState): void {
-        this.sessions.get(sessionState.sessionId)?.asyncTasks.clear();
+        const previous = this.sessions.get(sessionState.sessionId);
+        previous?.asyncTasks.clear();
+        // The new state holds no suggestion, so the old one must drop its result in flight and clear what it published.
+        void previous?.promptSuggestions?.clear();
         this.sessions.set(sessionState.sessionId, sessionState);
     }
 
@@ -1995,6 +2002,7 @@ export class CodexAcpServer {
                 await this.interruptSessionTurn(sessionState, "Close", true);
                 if (sessionState.subagents instanceof StandardSubagentEventRouter) await sessionState.subagents.finishOutstanding("disconnected");
                 sessionState.asyncTasks.clear();
+                sessionState.promptSuggestions?.invalidate();
             } else {
                 logger.log("Close request received for unknown local session", {sessionId: params.sessionId});
             }
@@ -2272,6 +2280,7 @@ export class CodexAcpServer {
 
                 session.asyncTasks.setAppServer(replacement.appServerClient);
                 session.titleGen?.rebindAppServer(replacement.appServerClient);
+                session.promptSuggestions?.rebindAppServer(replacement.appServerClient);
                 if (replacement.appServerClient.connectionLoss.lost) {
                     // The new app-server died: the next use of each session resumes it in the restarted one.
                     break;
@@ -2460,6 +2469,7 @@ export class CodexAcpServer {
         for (const session of this.sessions.values()) {
             session.asyncTasks.setAppServer(client.appServerClient);
             session.titleGen?.rebindAppServer(client.appServerClient);
+            session.promptSuggestions?.rebindAppServer(client.appServerClient);
         }
     }
 
@@ -3471,6 +3481,7 @@ export class CodexAcpServer {
             () => sessionState.sessionTitleSource,
             this.sessionIndex.titleWriter(sessionId),
         );
+        sessionState.promptSuggestions = this.createPromptSuggestions(sessionState);
         this.installSessionState(sessionState);
         AcpV2Connection.of(this.connection)?.restoreForegroundState(sessionId, thread.status.type === "active");
         this.recovery?.markLoaded(sessionState, openGeneration);
@@ -3855,6 +3866,20 @@ export class CodexAcpServer {
             if (title) return title;
         }
         return null;
+    }
+
+    private createPromptSuggestions(sessionState: SessionState): PromptSuggestionGenerator | undefined {
+        if (!sessionState.clientCapabilities.airClient || !promptSuggestionsEnabled()) return undefined;
+        return new PromptSuggestionGenerator(
+            this.codexAcpClient.appServerClient,
+            sessionState.cwd,
+            async text => {
+                await new ACPSessionConnection(this.connection, sessionState.sessionId).update({
+                    sessionUpdate: "session_info_update",
+                    _meta: promptSuggestionsMeta(text),
+                });
+            },
+        );
     }
 
     private async publishFallbackSessionTitle(
@@ -4704,6 +4729,9 @@ export class CodexAcpServer {
             prompt: params.prompt,
         });
         const sessionState = this.getSessionState(params.sessionId);
+        // Awaited only when a clear is sent, so a prompt with no held suggestion starts in the same tick.
+        const clearing = sessionState.promptSuggestions?.clear();
+        if (clearing) await clearing;
         const agentFileChangeReportRequest = clientSupportsAgentFileChangeReports(this.clientCapabilities)
             ? parseAgentFileChangeReportRequest(params._meta)
             : null;
@@ -5234,14 +5262,15 @@ export class CodexAcpServer {
             // Never await — must not block the prompt response.
             // Note: turn.items contains only agent output, not the user message —
             // extract prompt text from params instead.
-            if (sessionState.titleGen) {
-                const promptText = params.prompt
-                    .filter((b): b is Extract<acp.ContentBlock, { type: "text" }> => b.type === "text")
-                    .map(b => b.text)
-                    .join(" ")
-                    .trim();
-                sessionState.titleGen.onTurnCompleted(promptText);
-            }
+            const promptText = params.prompt
+                .filter((b): b is Extract<acp.ContentBlock, { type: "text" }> => b.type === "text")
+                .map(b => b.text)
+                .join(" ")
+                .trim();
+            sessionState.titleGen?.onTurnCompleted(promptText);
+
+            // Same fire-and-forget rule: a predicted follow-up comes after the answer, never before it.
+            sessionState.promptSuggestions?.onTurnCompleted(promptText, eventHandler.getLastAgentMessageText());
 
             // On v2, a prompt whose user message was never recorded (`pendingInsertion` still set)
             // never happened from the client's view, so it must not leave a title behind either.
