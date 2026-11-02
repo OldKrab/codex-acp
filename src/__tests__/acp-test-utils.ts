@@ -249,16 +249,10 @@ function escapeTOML(value: string): string {
 }
 
 export function removeDirectoryWithRetry(directory: string): void {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-        try {
-            fs.rmSync(directory, { recursive: true, force: true });
-            return;
-        } catch (error) {
-            const err = error as NodeJS.ErrnoException;
-            if (err.code !== "ENOTEMPTY" && err.code !== "EBUSY") {
-                return;
-            }
-        }
+    try {
+        fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (error) {
+        console.warn(`Failed to remove test directory ${directory}:`, error);
     }
 }
 
