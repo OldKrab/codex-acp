@@ -12,11 +12,22 @@ runs the verification suite, and publishes to npm.
 There is no manual release button, and versions are never typed in by hand: the
 version is an output of the commit history, not an input.
 
-The first `1.0.0` publish bootstraps the package with the repository's encrypted
-`NPM_TOKEN` secret. After that package exists, configure npm Trusted Publishing
-for `OldKrab/codex-acp`, workflow `publish.yml`, environment `release`, and allow
-`npm publish`. Later releases authenticate through GitHub Actions OIDC; remove
-`NPM_TOKEN` after the trusted publisher succeeds.
+Releases currently publish with the repository's encrypted `NPM_TOKEN` secret,
+through `NODE_AUTH_TOKEN` in `publish.yml`. Trusted Publishing is not configured
+yet: the published versions name the account behind that token and carry no
+provenance attestation.
+
+To move to Trusted Publishing, run this once from a machine logged in to npm:
+
+```sh
+npm trust github @openaide/codex-acp --file publish.yml --repo OldKrab/codex-acp --env release --allow-publish
+```
+
+It needs npm 11.15 or newer and an interactive login on an account with
+two-factor authentication. A granular token that bypasses two-factor
+authentication is rejected, so it cannot run from CI. After a release publishes
+through the trusted publisher, remove `NODE_AUTH_TOKEN` from `publish.yml` and
+delete the `NPM_TOKEN` secret.
 
 ## Releasing
 
@@ -126,8 +137,8 @@ Then publish the tag as described below.
 
 ### The tag exists but npm is missing
 
-npm publishes through OIDC from inside the workflow, so this cannot be done from
-a laptop. Re-run the publish workflow against the existing tag:
+npm publishes with credentials that only the workflow has, so this cannot be
+done from a laptop. Re-run the publish workflow against the existing tag:
 
 ```sh
 gh workflow run publish.yml -f ref="openaide-codex-acp-v<version>"
@@ -161,10 +172,10 @@ conflict fixes, is kept so that work can be carried into the newer update.
 | Secret                                                        | Used for                                                          |
 | ------------------------------------------------------------- | ----------------------------------------------------------------- |
 | `RELEASE_APP_CLIENT_ID`, `RELEASE_APP_PRIVATE_KEY`            | App token for release PRs and tags, so they can trigger workflows |
+| `NPM_TOKEN`                                                   | `npm publish`, until Trusted Publishing replaces it               |
 | `OPENAI_API_KEY`                                              | The e2e suite in the `verify` job                                 |
 
-Publishing to npm uses OIDC trusted publishing, so there is no npm token. The
-release-please and publish jobs run in the `release` environment.
+The release-please and publish jobs run in the `release` environment.
 
 The release GitHub App also needs repository `Contents: write`, `Pull requests:
 write`, and `Workflows: write` permissions. The workflow permission is required
