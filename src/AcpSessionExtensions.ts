@@ -5,7 +5,7 @@ import type {StandardSubagentUpdate, SubagentSpawnedUpdate, SubagentStateUpdate}
 /** Updates the adapter emits, including its existing AIR subagent contract. */
 export type AcpSessionUpdate =
     | Exclude<SessionNotification["update"], {
-        sessionUpdate: "subagent_update" | "session_message" | "session_message_chunk";
+        sessionUpdate: "subagent_update" | "session_message_chunk";
     }>
     | SubagentSpawnedUpdate
     | SubagentStateUpdate

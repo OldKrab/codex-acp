@@ -1,6 +1,6 @@
 import type {ReasoningEffort, ServerNotification} from "../app-server";
 import type {StateUpdate} from "@agentclientprotocol/sdk/experimental/v2/unstable";
-import type {Thread, ThreadItem, Turn} from "../app-server/v2";
+import type {SubAgentActivityKind, Thread, ThreadItem, Turn} from "../app-server/v2";
 import {ACPSessionConnection} from "../ACPSessionConnection";
 import {AcpV2ForegroundState} from "../AcpV2ForegroundState";
 import {CodexPlanStream} from "../CodexPlanStream";
@@ -11,6 +11,7 @@ import {readableServiceErrorMessage} from "../ServiceErrorMessage";
 import {toV2IdleState} from "../AcpV2Prompt";
 import {normalizeSessionTitle} from "../SessionTitle";
 import {CollabAgentReporter} from "../tool-calls/reporters/CollabAgentReporter";
+import {SubagentDelegationMessages} from "./SubagentDelegationMessages";
 import {SubagentActivityReporter} from "../tool-calls/reporters/SubagentActivityReporter";
 import type {SubagentState} from "./AcpSubagents";
 import {
@@ -45,6 +46,7 @@ type Pending = {
     parentThreadId?: string;
     path?: string;
     description?: string;
+    promptSourceId?: string;
     notifications: PendingNotificationBuffer;
 };
 type Configuration = {
@@ -67,6 +69,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     private readonly pendingConfigurations = new Set<string>();
     private readonly configurationRequests = new Map<string, object>();
     private readonly spawnsInFlight = new Set<string>();
+    private readonly delegation: SubagentDelegationMessages;
     private readonly appliedSettings = new WeakSet<object>();
     // Receipt-time facts fence cancellation while presentation is backpressured.
     private readonly unobservable = new Set<string>();
@@ -94,6 +97,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         },
     ) {
         this.deferredLive = new PendingNotificationBuffer(rootSessionId);
+        this.delegation = new SubagentDelegationMessages(session);
     }
 
     /** Admission precedes rendering, including terminal/tool cleanup. */
@@ -139,6 +143,10 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                 && (notification.params.item.type === "subAgentActivity" || notification.params.item.type === "collabAgentToolCall"));
         if (notification.method === "item/started" || notification.method === "item/completed") {
             const item = notification.params.item;
+            if (item.type === "userMessage" && threadId === this.rootSessionId) this.delegation.rememberRootPrompt(notification.params.turnId, item);
+            if (item.type === "collabAgentToolCall" && (item.tool === "sendInput" || item.tool === "followupTask") && item.status !== "failed") {
+                await this.publishDelegation(item, false);
+            }
             if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") {
                 if (notification.method === "item/started") this.spawnsInFlight.add(item.id);
                 else this.spawnsInFlight.delete(item.id);
@@ -146,9 +154,10 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                     if (!id.trim() || id === item.senderThreadId || id === this.rootSessionId || this.children.has(id)) continue;
                     const pending = this.pendingFor(id);
                     pending.parentThreadId = item.senderThreadId;
-                    if (item.prompt) pending.description = item.prompt;
+                    if (item.prompt) { pending.description = item.prompt; pending.promptSourceId = item.id; }
                 }
                 await this.materializePending();
+                await this.publishDelegation(item, true);
                 return true;
             }
             if (item.type === "subAgentActivity") {
@@ -165,6 +174,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                 } else this.pendingFor(item.agentThreadId).path = normalizeAgentPath(item.agentPath);
                 await this.observeConfiguration(item.agentThreadId, {model: item.model, effort: item.reasoningEffort}, "activity");
                 await this.materializePending();
+                await this.publishActivityPrompt(item.agentThreadId, item.kind, notification.params.turnId);
                 return true;
             }
         }
@@ -299,6 +309,26 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         return [...this.children.values()].find(child => child.path === parentPath)?.sessionId;
     }
 
+    /** Delegated input of a parent's call; replay publishes only launches, see `streamStandardHistory`. */
+    async publishDelegation(item: ThreadItem & {type: "collabAgentToolCall"}, inParent: boolean): Promise<void> {
+        if (!item.prompt) return;
+        for (const id of item.receiverThreadIds) {
+            const child = this.children.get(id);
+            if (child) await this.delegation.publish(child, item.id, item.prompt, inParent);
+        }
+    }
+
+    /** A child with a description already opened with its exact prompt. */
+    async publishActivityPrompt(threadId: string, kind: SubAgentActivityKind, turnId: string | undefined): Promise<void> {
+        const child = this.children.get(threadId);
+        if (!child || child.description !== undefined || turnId === undefined || (kind !== "started" && kind !== "interacted")) return;
+        await this.delegation.publishRootPrompt(child, turnId);
+    }
+
+    rememberRootPrompt(turnId: string, item: ThreadItem & {type: "userMessage"}): void {
+        this.delegation.rememberRootPrompt(turnId, item);
+    }
+
     private async materializePending(): Promise<void> {
         let changed: boolean;
         do {
@@ -307,6 +337,10 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                 const parent = this.parentFor(pending);
                 if (parent === undefined) continue;
                 await this.announce(threadId, parent, pending.path, pending.description, true);
+                const child = this.children.get(threadId);
+                if (child && pending.promptSourceId && pending.description) {
+                    await this.delegation.publish(child, pending.promptSourceId, pending.description, true);
+                }
                 this.pending.delete(threadId);
                 this.replayQueue.push(...pending.notifications.take());
                 changed = true;

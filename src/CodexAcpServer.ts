@@ -3770,9 +3770,10 @@ export class CodexAcpServer {
                 logger.error(`Failed to replay subagent ${childThreadId}`, error);
             }
         };
-        const replayActivity = async (item: ThreadItem & {type: "subAgentActivity"}): Promise<boolean> => {
+        const replayActivity = async (item: ThreadItem & {type: "subAgentActivity"}, turnId?: string): Promise<boolean> => {
             const childId = await router.announceHistory(item.agentThreadId, item.agentPath);
             if (childId === null) return false;
+            await router.publishActivityPrompt(item.agentThreadId, item.kind, turnId);
             const configOptions = subagentConfigurationOptions(this.subagentModels(state), {model: item.model, effort: item.reasoningEffort});
             if (configOptions.length > 0) {
                 try { await session.update({sessionUpdate: "config_option_update", configOptions}, childId); }
@@ -3794,16 +3795,23 @@ export class CodexAcpServer {
                 if (item.type === "subAgentActivity") {
                     if (isRootAgentPath(item.agentPath)) continue;
                     if (ancestry.has(item.agentThreadId)) { gaps.add(item.agentThreadId); continue; }
-                    if (!await replayActivity(item)) unresolved.push(item);
+                    if (!await replayActivity(item, turnId)) unresolved.push(item);
                     continue;
+                }
+                if (item.type === "userMessage" && threadId === state.sessionId && turnId !== undefined) {
+                    router.rememberRootPrompt(turnId, item);
                 }
                 if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") {
                     if (item.senderThreadId === threadId) for (const child of item.receiverThreadIds) {
                         if (!child.trim() || ancestry.has(child)) { gaps.add(child); continue; }
-                        await replayChild(child, await router.announce(child, sessionId, undefined, item.prompt ?? undefined));
+                        const childId = await router.announce(child, sessionId, undefined, item.prompt ?? undefined);
+                        await router.publishDelegation(item, true);
+                        await replayChild(child, childId);
                     }
                     continue;
                 }
+                // TODO: Replay later delegated prompts too once child history replays run by run; each child
+                // replays whole at its spawn, so a follow-up prompt would land after the work it caused.
                 if (threadId !== state.sessionId) {
                     // Agent-owned input is not an ordinary human message. Incomplete text has no safe delta cursor.
                     if (item.type === "userMessage" || (!completed && !supportsPartialHistory(item))) {

@@ -121,6 +121,7 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
             };
         }
         case "subagent_update":
+        case "session_message":
             return update;
         // AIR's private contract is selected independently upstream.
         case "subagent_spawned": {

@@ -181,6 +181,9 @@ describeIntegration("integration: live standard subagents", () => {
                 await vi.waitFor(() => expect(updates.slice(replayStart).some(entry =>
                     state(entry)?.state === "idle" && state(entry)?.stopReason === "end_turn"), stderr).toBe(true));
             }
+            // Multi-agent v2 hides the delegated text, so the child opens with the root prompt.
+            expect(updates.some(entry => entry.sessionId === childId && entry.update.sessionUpdate === "session_message"
+                && entry.update.content[0].text === "Delegate once")).toBe(true);
             expect(updates.some(entry => ["subagent_spawned", "subagent_state_update", "_subagent_update"].includes(entry.update.sessionUpdate))).toBe(false);
             expect(mock.unexpectedRequests).toBe(0);
         } finally {
