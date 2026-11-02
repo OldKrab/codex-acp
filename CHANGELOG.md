@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.4](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v2.2.3...openaide-codex-acp-v2.2.4) (2026-11-02)
+
+
+### Bug Fixes
+
+* replay a later root prompt before the child work it led to ([#55](https://github.com/OldKrab/codex-acp/issues/55)) ([fefcf6b](https://github.com/OldKrab/codex-acp/commit/fefcf6ba45a36ccff172feb2e2f24f6dd4060150))
+
 ## [2.2.3](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v2.2.2...openaide-codex-acp-v2.2.3) (2026-11-02)
 
 
