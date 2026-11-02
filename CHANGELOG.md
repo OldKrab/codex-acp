@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.3](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v2.2.2...openaide-codex-acp-v2.2.3) (2026-11-02)
+
+
+### Bug Fixes
+
+* keep turn ids when replaying a root session ([#50](https://github.com/OldKrab/codex-acp/issues/50)) ([b31ae2a](https://github.com/OldKrab/codex-acp/commit/b31ae2a75f476686b2160ad5fa5a3677051e3ec9))
+* name subagents and their control rows for the reader ([#51](https://github.com/OldKrab/codex-acp/issues/51)) ([178e71a](https://github.com/OldKrab/codex-acp/commit/178e71a1ea98bdbc00b9949d511b4e5672e498b6))
+
 ## [2.2.2](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v2.2.1...openaide-codex-acp-v2.2.2) (2026-11-02)
 
 
