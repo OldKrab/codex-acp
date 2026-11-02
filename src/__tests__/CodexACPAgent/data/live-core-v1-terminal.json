@@ -64,6 +64,26 @@
     }
   },
   {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "state": "running"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "capabilities": {
+        "cancel": {}
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
     "sessionId": "thread-1:subagent:worker",
     "update": {
       "toolCallId": "terminal",
@@ -89,26 +109,6 @@
         }
       },
       "sessionUpdate": "tool_call_update"
-    }
-  },
-  {
-    "sessionId": "thread-1",
-    "update": {
-      "sessionId": "thread-1:subagent:worker",
-      "state": {
-        "state": "running"
-      },
-      "sessionUpdate": "subagent_update"
-    }
-  },
-  {
-    "sessionId": "thread-1",
-    "update": {
-      "sessionId": "thread-1:subagent:worker",
-      "capabilities": {
-        "cancel": {}
-      },
-      "sessionUpdate": "subagent_update"
     }
   }
 ]

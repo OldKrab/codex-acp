@@ -6,6 +6,7 @@ import {
     itemStarted, sessionId, turnStarted, turnCompleted, userMessageItem, type PromptSession,
 } from "./v2-prompt-harness";
 import {expectConformingV2SessionUpdates} from "./v2-session-update-guard";
+import {CodexAcpServer} from "../../CodexAcpServer";
 import {subagentProtocol} from "../../subagents/AcpSubagents";
 import {AIR_NATIVE_SUBAGENT_SESSIONS_KEY, withAirMeta} from "../../AirExtension";
 import {GOAL_CONTROL_METHOD, SESSION_STEERING_METHOD, LEGACY_SET_SESSION_MODEL_METHOD} from "../../AcpExtensions";
@@ -61,6 +62,18 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
     const load = () => h.request(version === 1 ? "session/load" : "session/resume", {
         sessionId, cwd, mcpServers: [], ...(version === 2 ? {replayFrom: {type: "start"}} : {}),
     });
+    /**
+     * The client can read the response before the adapter finishes publishing after it, and Node
+     * releases differ in which comes first. Live events emitted afterwards need the settled boundary.
+     */
+    const loadAndSettle = async () => {
+        const publication = vi.spyOn(CodexAcpServer.prototype, "afterSessionSetupResponse");
+        try {
+            await load();
+            await vi.waitFor(() => expect(publication).toHaveBeenCalled());
+            await publication.mock.results.at(-1)!.value;
+        } finally { publication.mockRestore(); }
+    };
     const childUpdates = () => h.scopedUpdates.filter(entry =>
         entry.sessionId.includes(":subagent:") || entry.update.sessionUpdate === "subagent_update");
     async function snapshot(name: string) {
@@ -217,7 +230,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
     it.each([sessionId, "another-root", null] as const)("restores only verified runtime children (parent: %s)", async parent => {
         await connect({onRequestPermission: request => ({outcome: {outcome: "selected", optionId: request.options[0]!.optionId}})});
         const resumes = history(h, [activityItem()], parent);
-        await load();
+        await loadAndSettle();
         await flush(h);
         expect(resumes).toEqual(parent === sessionId ? [sessionId, worker] : [sessionId]);
         h.emit(onWorker(turnStarted("child-turn")));
@@ -234,7 +247,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         h.emit(onWorker(itemStarted(commandExecutionItem("terminal"), "child-turn")));
         await flush(h);
         history(h);
-        await load();
+        await loadAndSettle();
         h.emit({method: "item/commandExecution/outputDelta", params: {threadId: worker, turnId: "child-turn", itemId: "terminal", delta: "Still streaming"}});
         h.emit({method: "item/completed", params: {threadId: worker, turnId: "child-turn", completedAtMs: 0,
             item: {...commandExecutionItem("terminal", "completed"), exitCode: 0, aggregatedOutput: "Still streaming"}}});
