@@ -130,7 +130,8 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
         }
         expect(text("Nested answer")).toBe(true);
         expect(childUpdates().some(entry => entry.update.sessionUpdate === "user_message_chunk")).toBe(false);
-        expect(gap()).toHaveLength(1);
+        expect(childUpdates().filter(entry => entry.update.sessionUpdate === "session_message")).toHaveLength(1);
+        expect(gap()).toEqual([]);
     });
 
     it.each([false, true])("enriches an existing pathless parent before replaying a newly recorded descendant (cold: %s)", async cold => {

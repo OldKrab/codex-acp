@@ -4,12 +4,16 @@ import {logger} from "../Logger";
 
 type DelegatedChild = {sessionId: string; parentSessionId: string};
 
+export const userMessageText = (item: ThreadItem & {type: "userMessage"}): string =>
+    item.content.filter(content => content.type === "text").map(content => content.text).join("").trim();
+
 /**
  * Publishes delegated input as ACP `session_message`s. Fork-owned, so that a sync only
  * reconciles the router's call sites.
  *
- * Codex sends a child no input item, so the parent's items are the only source: a
- * `collabAgentToolCall` names the exact prompt, and a `subAgentActivity` names none.
+ * Codex streams a child no input item, so live the parent's items are the only source: a
+ * `collabAgentToolCall` names the exact prompt, and a `subAgentActivity` names none. A
+ * child's recorded history does hold its input, as user messages no human wrote.
  */
 export class SubagentDelegationMessages {
     private readonly published = new Set<string>();
@@ -24,7 +28,7 @@ export class SubagentDelegationMessages {
 
     /** One root turn runs at a time, so only the latest prompt can have caused an activity. */
     rememberRootPrompt(turnId: string, item: ThreadItem & {type: "userMessage"}): void {
-        const text = item.content.filter(content => content.type === "text").map(content => content.text).join("").trim();
+        const text = userMessageText(item);
         if (text) this.rootPrompt = {turnId, sourceId: item.id, text};
     }
 
@@ -41,6 +45,17 @@ export class SubagentDelegationMessages {
         };
         if (inParent) await this.session.update({...message, recipientMessageId: messageId}, child.parentSessionId);
         await this.session.update({...message, senderMessageId: messageId}, child.sessionId);
+    }
+
+    /** Input a child recorded, in place: each child replays whole at its spawn, so a parent's later call would land after the work. */
+    async publishRecorded(child: DelegatedChild, item: ThreadItem & {type: "userMessage"}): Promise<boolean> {
+        const text = userMessageText(item);
+        if (!text) {
+            logger.log("Recorded child input has no text to replay", {subagentSessionId: child.sessionId});
+            return false;
+        }
+        await this.publish(child, item.id, text, false);
+        return true;
     }
 
     /** Multi-agent v2 hides the delegated text, so the child opens with the human prompt that caused its run. */

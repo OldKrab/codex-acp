@@ -16,6 +16,8 @@ const collab = (tool: Collab["tool"], id: string, prompt: string | null, overrid
         prompt, model: null, reasoningEffort: null, agentsStates: {}, ...overrides});
 const activity = (id: string, kind: "started" | "interacted" | "completed", thread = worker): ThreadItem =>
     ({type: "subAgentActivity", id, kind, model: null, reasoningEffort: null, agentThreadId: thread, agentPath: `/root/${thread}`});
+const answer = (id: string, text: string) => ({type: "agentMessage", id, text} as ThreadItem);
+const delegated = (id: string, text: string): ThreadItem => ({...userMessageItem(null, text), id});
 const onWorker = (event: ServerNotification): ServerNotification =>
     ({...event, params: {...event.params, threadId: worker}} as ServerNotification);
 
@@ -34,6 +36,11 @@ describe.each([1, 2] as const)("ACP v%s delegated prompts", version => {
         .filter(entry => entry.sessionId === session && entry.update.sessionUpdate === "session_message")
         .map(entry => entry.update as {content: Array<{text: string}>; senderSessionId: string; recipientSessionId: string; messageId: string});
     const texts = (session: string) => messages(session).map(message => message.content[0]?.text);
+    const gap = () => h.scopedUpdates.filter(entry => entry.update.sessionUpdate === "agent_thought_chunk"
+        && entry.update.messageId === `${sessionId}:subagent-history-gap`);
+    const childOrder = () => h.scopedUpdates.filter(entry => entry.sessionId === childId).flatMap(({update}) =>
+        update.sessionUpdate === "session_message" ? [(update.content as Array<{text: string}>)[0]!.text]
+            : update.sessionUpdate === "agent_message_chunk" ? [(update.content as {text: string}).text] : []);
 
     it("announces a spawn with no activity item and opens the child with its prompt", async () => {
         await connect();
@@ -106,14 +113,14 @@ describe.each([1, 2] as const)("ACP v%s delegated prompts", version => {
         expect(texts(childId)).toEqual(["Exact words"]);
     });
 
-    function recordHistory() {
+    function recordHistory(childItems: ThreadItem[] = [answer("answer", "Recorded answer")]) {
         const thread = (id: string) => ({...createThread(), id, parentThreadId: id === worker ? sessionId : null, status: {type: "idle" as const}});
         h.setCodexResponse("thread/resume", async params => ({...codexResponse("thread/start") as object, thread: thread((params as {threadId: string}).threadId)}));
         h.setCodexResponse("thread/read", async params => {
             const id = (params as {threadId: string}).threadId;
             const items: ThreadItem[] = id === sessionId
                 ? [userMessageItem("root", "Human words"), collab("spawnAgent", "spawn", "Recorded task")]
-                : [{type: "agentMessage", id: "answer", text: "Recorded answer"} as ThreadItem];
+                : childItems;
             return {thread: {...thread(id), turns: [{...createTurn("completed"), itemsView: "full", items}]}};
         });
     }
@@ -131,6 +138,47 @@ describe.each([1, 2] as const)("ACP v%s delegated prompts", version => {
         const child = h.scopedUpdates.filter(entry => entry.sessionId === childId).map(entry => entry.update.sessionUpdate);
         expect(texts(childId)).toEqual(["Recorded task"]);
         expect(child.indexOf("session_message")).toBeLessThan(child.findIndex(kind => kind.includes("agent_message")));
+    });
+
+    it("does not repeat or report the launch prompt a child recorded in its own history", async () => {
+        await connect();
+        recordHistory([delegated("launch", "Recorded task"), answer("answer", "Recorded answer")]);
+        await load();
+        expect(texts(sessionId)).toEqual(["Recorded task"]);
+        expect(texts(childId)).toEqual(["Recorded task"]);
+        expect(gap()).toEqual([]);
+    });
+
+    it("replays a later prompt in place, without a second row in the parent", async () => {
+        await connect();
+        recordHistory([delegated("launch", "Recorded task"), answer("one", "First answer"),
+            delegated("again", "Second task"), answer("two", "Second answer")]);
+        await load();
+        expect(childOrder()).toEqual(["Recorded task", "First answer", "Second task", "Second answer"]);
+        expect(texts(sessionId)).toEqual(["Recorded task"]);
+        expect(gap()).toEqual([]);
+    });
+
+    it("keeps a later prompt that repeats the launch words", async () => {
+        await connect();
+        recordHistory([delegated("launch", "Recorded task"), answer("one", "First answer"), delegated("again", "Recorded task")]);
+        await load();
+        expect(childOrder()).toEqual(["Recorded task", "First answer", "Recorded task"]);
+    });
+
+    it("replays history a forked child inherited before its launch prompt", async () => {
+        await connect();
+        recordHistory([delegated("inherited", "Human words"), delegated("launch", "Recorded task"), answer("answer", "Recorded answer")]);
+        await load();
+        expect(childOrder()).toEqual(["Recorded task", "Human words", "Recorded answer"]);
+        expect(gap()).toEqual([]);
+    });
+
+    it("reports a gap for delegated input with no text to show", async () => {
+        await connect();
+        recordHistory([{...userMessageItem(null), id: "picture", content: [{type: "image", url: "data:image/png;base64,AA"}]} as ThreadItem]);
+        await load();
+        expect(gap()).toHaveLength(1);
     });
 
     it("repeats the launch prompt each time a live session reloads, without repeating it live", async () => {

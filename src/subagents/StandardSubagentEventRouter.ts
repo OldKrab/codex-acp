@@ -314,13 +314,23 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         this.delegation.forgetPublished();
     }
 
-    /** Delegated input of a parent's call; replay publishes only launches, see `streamStandardHistory`. */
+    /** Delegated input of a parent's call; replay takes later input from the child, see `publishRecordedPrompt`. */
     async publishDelegation(item: ThreadItem & {type: "collabAgentToolCall"}, inParent: boolean): Promise<void> {
         if (!item.prompt) return;
         for (const id of item.receiverThreadIds) {
             const child = this.children.get(id);
             if (child) await this.delegation.publish(child, item.id, item.prompt, inParent);
         }
+    }
+
+    /** The prompt a parent's spawn already published, which the child's own history repeats. */
+    launchPrompt(threadId: string): string | undefined {
+        return this.children.get(threadId)?.description?.trim();
+    }
+
+    async publishRecordedPrompt(threadId: string, item: ThreadItem & {type: "userMessage"}): Promise<boolean> {
+        const child = this.children.get(threadId);
+        return child !== undefined && await this.delegation.publishRecorded(child, item);
     }
 
     /** A child with a description already opened with its exact prompt. */
