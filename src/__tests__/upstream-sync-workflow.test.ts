@@ -148,9 +148,9 @@ describe("upstream update branch", () => {
       encoding: "utf8",
     });
     expect(mergeability.status, mergeability.stdout + mergeability.stderr).toBe(0);
-    expect(spawnSync("git", ["merge-base", "--is-ancestor", release, "sync/v2.0.0"], {
-      cwd: repository,
-    }).status).toBe(0);
+    // One ordinary commit on the fork, matching how the PR is squash-merged.
+    expect(git(repository, "log", "-1", "--format=%P", "sync/v2.0.0"))
+      .toBe(git(repository, "rev-parse", "main"));
 
     const mergedPackage = JSON.parse(readFileSync(path.join(repository, "package.json"), "utf8"));
     expect(mergedPackage).toMatchObject({
@@ -191,6 +191,43 @@ describe("upstream update branch", () => {
       .toBe(git(repository, "rev-parse", "main"));
     expect(git(repository, "show", "-s", "--format=%(trailers:key=Upstream-Sync-Release,valueonly)"))
       .toBe(release);
+  });
+
+  test("uses the recorded release as the base after a squash-merged sync", () => {
+    const repository = mkdtempSync(path.join(tmpdir(), "codex-acp-upstream-squash-"));
+    temporaryRepositories.push(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Upstream Sync Test");
+    git(repository, "config", "user.email", "upstream-sync@example.invalid");
+    const release = (version: string) => {
+      const metadata = {name: "adapter", version: "1.0.0", dependencies: {alpha: version}};
+      writeJson(repository, "package.json", metadata);
+      writeJson(repository, "package-lock.json", packageLock(metadata.name, metadata.version, metadata.dependencies));
+      write(repository, "src/product.ts", `export const product = "${version}";\n`);
+      git(repository, "add", ".");
+      git(repository, "commit", "-m", `upstream ${version}`);
+      return git(repository, "rev-parse", "HEAD");
+    };
+    write(repository, ".github/workflows/publish.yml", "name: Publish\n");
+    release("1.0.0");
+    git(repository, "switch", "--create", "upstream");
+    const recorded = release("2.0.0");
+    const next = release("3.0.0");
+    // The squash-merged sync of 2.0.0 gives the fork its content but not its history.
+    git(repository, "switch", "main");
+    git(repository, "checkout", recorded, "--", ".");
+    git(repository, "commit", "-m", "sync upstream 2.0.0");
+    const sync = (...base: string[]) => spawnSync(process.execPath,
+      [prepareScript, "--release", next, ...base, "--tag", "v3.0.0", "--branch", "sync/v3.0.0"],
+      {cwd: repository, encoding: "utf8"});
+
+    // Git's own common ancestor predates the sync, so both sides look changed.
+    expect(sync().status).toBe(2);
+    const result = sync("--base", recorded);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(path.join(repository, "package.json"), "utf8")).dependencies).toEqual({alpha: "3.0.0"});
+    expect(readFileSync(path.join(repository, "src/product.ts"), "utf8")).toBe('export const product = "3.0.0";\n');
   });
 
   test.each(["source", "dependency"])("reports a %s conflict for a draft PR without leaving a partial merge", (conflict) => {

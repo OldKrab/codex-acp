@@ -48,6 +48,14 @@ function requiredArgument(name) {
   return value;
 }
 
+function optionalArgument(name) {
+  return process.argv.includes(name) ? requiredArgument(name) : undefined;
+}
+
+function abort() {
+  git(["reset", "--hard", "--quiet", "HEAD"]);
+}
+
 function jsonAt(ref, file) {
   return JSON.parse(git(["show", `${ref}:${file}`]));
 }
@@ -99,7 +107,9 @@ function prepare() {
   }
 
   const forkHead = git(["rev-parse", "HEAD"]);
-  const mergeBase = git(["merge-base", forkHead, release]);
+  // Sync PRs are squash-merged, so the fork's history does not contain upstream's.
+  // The upstream release the fork last recorded is the true common ancestor.
+  const mergeBase = optionalArgument("--base") ?? git(["merge-base", forkHead, release]);
   const basePackage = jsonAt(mergeBase, "package.json");
   const forkPackage = jsonAt(forkHead, "package.json");
   const upstreamPackage = jsonAt(release, "package.json");
@@ -117,19 +127,26 @@ function prepare() {
   const mergedLock = mergeJson(baseLock, forkLock, upstreamLock, forkOwnedLockPaths);
 
   git(["switch", "--create", branch]);
-  const merge = spawnSync("git", ["merge", "--no-ff", "--no-commit", release], {
+  // Apply upstream's changes since the base as a three-way patch. The result is one
+  // ordinary commit on top of the fork, matching how the PR is squash-merged.
+  const diff = execFileSync("git", ["diff", "--binary", "--full-index", mergeBase, release], {
+    maxBuffer: 1 << 30,
+  });
+  const merge = spawnSync("git", ["apply", "--3way", "--index", "--whitespace=nowarn"], {
     encoding: "utf8",
+    input: diff,
   });
   if (merge.status !== 0) {
     const conflicts = git(["diff", "--name-only", "--diff-filter=U"])
       .split("\n")
       .filter(Boolean);
     if (conflicts.length === 0) {
+      abort();
       throw new Error(`Unable to merge upstream ${tag}: ${merge.stderr || merge.stdout}`);
     }
     const unexpected = conflicts.filter((file) => !allowedConflicts.has(file));
     if (unexpected.length > 0) {
-      git(["merge", "--abort"]);
+      abort();
       throw new SyncConflict(`Upstream changes need resolution: ${unexpected.join(", ")}`);
     }
   }
@@ -146,11 +163,11 @@ function prepare() {
   ]);
   const unresolved = git(["diff", "--name-only", "--diff-filter=U"]);
   if (unresolved) {
-    git(["merge", "--abort"]);
+    abort();
     throw new SyncConflict(`Unresolved upstream conflicts: ${unresolved.replaceAll("\n", ", ")}`);
   }
   git(["diff", "--cached", "--check"]);
-  git(["commit", "--message", `Merge upstream ${tag}\n\nUpstream-Sync-Base: ${forkHead}\nUpstream-Sync-Release: ${release}`]);
+  git(["commit", "--message", `Sync upstream ${tag}\n\nUpstream-Sync-Base: ${forkHead}\nUpstream-Sync-Release: ${release}`]);
 }
 
 const started = Date.now();
