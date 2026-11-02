@@ -3546,6 +3546,7 @@ export class CodexAcpServer {
             isOpen,
         );
         if (this.usesStandardSubagents()) {
+            if (sessionState.subagents instanceof StandardSubagentEventRouter) sessionState.subagents.beginHistoryReplay();
             await this.streamStandardHistory(sessionId, standardHistoryItems(itemPages), sessionState, isOpen);
             return;
         }

@@ -309,6 +309,11 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         return [...this.children.values()].find(child => child.path === parentPath)?.sessionId;
     }
 
+    /** A reload keeps this router, so its history must not be deduped against what the live stream showed. */
+    beginHistoryReplay(): void {
+        this.delegation.forgetPublished();
+    }
+
     /** Delegated input of a parent's call; replay publishes only launches, see `streamStandardHistory`. */
     async publishDelegation(item: ThreadItem & {type: "collabAgentToolCall"}, inParent: boolean): Promise<void> {
         if (!item.prompt) return;
