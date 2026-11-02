@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.2](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v2.2.1...openaide-codex-acp-v2.2.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* replay delegated child input instead of reporting a gap ([#44](https://github.com/OldKrab/codex-acp/issues/44)) ([8bd634e](https://github.com/OldKrab/codex-acp/commit/8bd634ebf7ef9f824b2c902c612c935c3ffed822))
+
 ## [2.2.1](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v2.2.0...openaide-codex-acp-v2.2.1) (2026-11-02)
 
 
