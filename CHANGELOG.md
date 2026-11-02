@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v2.2.0...openaide-codex-acp-v2.2.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* replay delegated prompts when a live session reloads ([#42](https://github.com/OldKrab/codex-acp/issues/42)) ([d230763](https://github.com/OldKrab/codex-acp/commit/d230763f8db792e2d0157a04eb96cb8d3637245b))
+
 ## [2.2.0](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v2.1.0...openaide-codex-acp-v2.2.0) (2026-11-02)
 
 
