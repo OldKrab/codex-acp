@@ -17,6 +17,11 @@ export class SubagentDelegationMessages {
 
     constructor(private readonly session: ACPSessionConnection) {}
 
+    /** Published ids dedupe one stream of updates; a client rebuilding from a replay must get every prompt again. */
+    forgetPublished(): void {
+        this.published.clear();
+    }
+
     /** One root turn runs at a time, so only the latest prompt can have caused an activity. */
     rememberRootPrompt(turnId: string, item: ThreadItem & {type: "userMessage"}): void {
         const text = item.content.filter(content => content.type === "text").map(content => content.text).join("").trim();

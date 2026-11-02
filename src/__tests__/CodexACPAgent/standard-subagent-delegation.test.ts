@@ -106,8 +106,7 @@ describe.each([1, 2] as const)("ACP v%s delegated prompts", version => {
         expect(texts(childId)).toEqual(["Exact words"]);
     });
 
-    it("replays the launch prompt before the child's history", async () => {
-        await connect();
+    function recordHistory() {
         const thread = (id: string) => ({...createThread(), id, parentThreadId: id === worker ? sessionId : null, status: {type: "idle" as const}});
         h.setCodexResponse("thread/resume", async params => ({...codexResponse("thread/start") as object, thread: thread((params as {threadId: string}).threadId)}));
         h.setCodexResponse("thread/read", async params => {
@@ -117,12 +116,32 @@ describe.each([1, 2] as const)("ACP v%s delegated prompts", version => {
                 : [{type: "agentMessage", id: "answer", text: "Recorded answer"} as ThreadItem];
             return {thread: {...thread(id), turns: [{...createTurn("completed"), itemsView: "full", items}]}};
         });
+    }
+    const load = async () => {
         await h.request(version === 1 ? "session/load" : "session/resume", {
             sessionId, cwd, mcpServers: [], ...(version === 2 ? {replayFrom: {type: "start"}} : {}),
         });
         await flush();
+    };
+
+    it("replays the launch prompt before the child's history", async () => {
+        await connect();
+        recordHistory();
+        await load();
         const child = h.scopedUpdates.filter(entry => entry.sessionId === childId).map(entry => entry.update.sessionUpdate);
         expect(texts(childId)).toEqual(["Recorded task"]);
         expect(child.indexOf("session_message")).toBeLessThan(child.findIndex(kind => kind.includes("agent_message")));
+    });
+
+    it("repeats the launch prompt each time a live session reloads, without repeating it live", async () => {
+        await connect();
+        recordHistory();
+        await load();
+        await load();
+        expect(texts(sessionId)).toEqual(["Recorded task", "Recorded task"]);
+        expect(texts(childId)).toEqual(["Recorded task", "Recorded task"]);
+        h.emit(itemCompleted(collab("spawnAgent", "spawn", "Recorded task")));
+        await flush();
+        expect(texts(childId)).toEqual(["Recorded task", "Recorded task"]);
     });
 });
