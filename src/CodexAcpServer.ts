@@ -3548,7 +3548,8 @@ export class CodexAcpServer {
         );
         if (this.usesStandardSubagents()) {
             if (sessionState.subagents instanceof StandardSubagentEventRouter) sessionState.subagents.beginHistoryReplay();
-            await this.streamStandardHistory(sessionId, standardHistoryEntries(visiblePages), sessionState, isOpen);
+            const steps = this.standardHistorySteps(sessionId, standardHistoryEntries(visiblePages), sessionState, isOpen);
+            while (!(await steps.next()).done) { /* Nothing holds the root. */ }
             return;
         }
         const itemPages = itemsOfEntries(visiblePages);
@@ -3742,16 +3743,38 @@ export class CodexAcpServer {
         }
     }
 
-    /** Recorded conversation data is independent of verified runtime ownership and current work. */
-    private async streamStandardHistory(
+    /**
+     * Recorded conversation data is independent of verified runtime ownership and current work.
+     * Yields the recorded start of each entry before replaying it, so that a parent can hold the stream there.
+     */
+    private async *standardHistorySteps(
         sessionId: string, pages: AsyncIterable<RecordedSubagentEntry[]>, state: SessionState, isOpen: () => boolean,
         threadId = sessionId, ancestry = new Set([threadId]), replayed = new Set<string>(), gaps = new Set<string>(),
-    ): Promise<void> {
+    ): AsyncGenerator<number, void> {
         const router = state.subagents;
         if (!(router instanceof StandardSubagentEventRouter)) return;
         const session = new ACPSessionConnection(this.connection, sessionId);
         const started = new Set<string>();
-        const replayChild = async (childThreadId: string, childId: string | null) => {
+        // A held child keeps its current page and the one read ahead. A closed load just drops the suspended streams.
+        const held = new Map<string, {steps: AsyncGenerator<number, void>; nextAtMs?: number}>();
+        const replayChildUntil = async (childThreadId: string, beforeMs?: number) => {
+            const child = held.get(childThreadId);
+            if (!child) return;
+            try {
+                while (beforeMs === undefined || child.nextAtMs === undefined || child.nextAtMs < beforeMs) {
+                    const step = await child.steps.next();
+                    if (step.done) { held.delete(childThreadId); return; }
+                    child.nextAtMs = step.value;
+                }
+            } catch (error) {
+                held.delete(childThreadId);
+                if (error instanceof SessionClosedDuringLoadError) throw error;
+                gaps.add(childThreadId);
+                logger.error(`Failed to replay subagent ${childThreadId}`, error);
+            }
+        };
+        const replayHeldChildren = async () => { for (const id of [...held.keys()]) await replayChildUntil(id); };
+        const openChild = async (childThreadId: string, childId: string | null) => {
             if (childId === null || replayed.has(childThreadId)) return;
             if (ancestry.has(childThreadId)) { gaps.add(childThreadId); return; }
             replayed.add(childThreadId);
@@ -3766,26 +3789,34 @@ export class CodexAcpServer {
                         if (runtime) await router.restoreRuntime(runtime, this.codexAcpClient.appServerClient.runningTurnId(childThreadId));
                     } catch (error) { logger.error(`Failed to restore subagent ${childThreadId}`, error); }
                 }
-                await this.streamStandardHistory(childId, history.items, state, isOpen, childThreadId,
-                    new Set([...ancestry, childThreadId]), replayed, gaps);
+                held.set(childThreadId, {steps: this.standardHistorySteps(childId, history.items, state, isOpen, childThreadId,
+                    new Set([...ancestry, childThreadId]), replayed, gaps)});
             } catch (error) {
                 if (error instanceof SessionClosedDuringLoadError) throw error;
                 gaps.add(childThreadId);
                 logger.error(`Failed to replay subagent ${childThreadId}`, error);
             }
         };
-        const replayActivity = async (item: ThreadItem & {type: "subAgentActivity"}, turnId?: string): Promise<boolean> => {
+        const replayActivity = async (
+            item: ThreadItem & {type: "subAgentActivity"}, turnId?: string, startedAtMs?: number,
+        ): Promise<boolean> => {
             const childId = await router.announceHistory(item.agentThreadId, item.agentPath);
             if (childId === null) return false;
-            // TODO: A child replays whole at its first activity, so a later turn's prompt lands after
-            // all of that child's history. Replaying per turn would keep each prompt before its turn.
+            // Live order: a prompt follows the work the child recorded before it. A legacy store dates only turns,
+            // so a child turn in progress stays whole and the prompt follows it. An undated prompt follows everything.
+            if (startedAtMs === undefined && held.has(item.agentThreadId)) {
+                logger.log("Subagent activity has no recorded time", {agentThreadId: item.agentThreadId});
+            }
+            await replayChildUntil(item.agentThreadId, startedAtMs);
             await router.publishActivityPrompt(item.agentThreadId, item.kind, turnId);
             const configOptions = subagentConfigurationOptions(this.subagentModels(state), {model: item.model, effort: item.reasoningEffort});
             if (configOptions.length > 0) {
                 try { await session.update({sessionUpdate: "config_option_update", configOptions}, childId); }
                 catch (error) { logger.error(`Failed to replay child configuration ${item.agentThreadId}`, error); }
             }
-            await replayChild(item.agentThreadId, childId);
+            await openChild(item.agentThreadId, childId);
+            // Only a root turn has a prompt for a child, so nothing else needs its children held.
+            if (threadId !== state.sessionId) await replayChildUntil(item.agentThreadId);
             return true;
         };
         let unresolved: Array<ThreadItem & {type: "subAgentActivity"}> = [];
@@ -3798,22 +3829,29 @@ export class CodexAcpServer {
                     else if (threadId !== state.sessionId) await router.replayTurnOutcome(threadId, entry.turn);
                     continue;
                 }
-                const {item, completed, turnId} = entry;
+                const {item, completed, turnId, startedAtMs} = entry;
+                if (startedAtMs !== undefined) {
+                    yield startedAtMs;
+                    if (!isOpen()) throw new SessionClosedDuringLoadError();
+                }
                 if (item.type === "subAgentActivity") {
                     if (isRootAgentPath(item.agentPath)) continue;
                     if (ancestry.has(item.agentThreadId)) { gaps.add(item.agentThreadId); continue; }
-                    if (!await replayActivity(item, turnId)) unresolved.push(item);
+                    if (!await replayActivity(item, turnId, startedAtMs)) unresolved.push(item);
                     continue;
                 }
                 if (item.type === "userMessage" && threadId === state.sessionId && turnId !== undefined) {
                     router.rememberRootPrompt(turnId, item);
                 }
                 if (item.type === "collabAgentToolCall" && item.tool === "spawnAgent") {
+                    // A held child may record the same spawn as its own, and the first announcement names the parent.
+                    await replayHeldChildren();
                     if (item.senderThreadId === threadId) for (const child of item.receiverThreadIds) {
                         if (!child.trim() || ancestry.has(child)) { gaps.add(child); continue; }
                         const childId = await router.announce(child, sessionId, undefined, item.prompt ?? undefined);
                         await router.publishDelegation(item, true);
-                        await replayChild(child, childId);
+                        await openChild(child, childId);
+                        await replayChildUntil(child);
                     }
                     continue;
                 }
@@ -3839,9 +3877,13 @@ export class CodexAcpServer {
                 }
             }
         }
+        await replayHeldChildren();
         while (unresolved.length > 0) {
             const pending: typeof unresolved = [];
-            for (const item of unresolved) if (!await replayActivity(item)) pending.push(item);
+            for (const item of unresolved) {
+                if (await replayActivity(item)) await replayChildUntil(item.agentThreadId);
+                else pending.push(item);
+            }
             if (pending.length === unresolved.length) { for (const item of pending) gaps.add(item.agentThreadId); break; }
             unresolved = pending;
         }
@@ -5680,7 +5722,10 @@ async function* itemsOfEntries(pages: AsyncIterable<ThreadItemEntry[]>): AsyncGe
 
 async function* standardHistoryEntries(pages: AsyncIterable<ThreadItemEntry[]>): AsyncGenerator<RecordedSubagentEntry[]> {
     for await (const page of pages) {
-        yield page.map(({item, turnId}) => ({item, turnId, completed: !("status" in item) || item.status !== "inProgress"}));
+        yield page.map(({item, turnId, startedAtMs}) => ({
+            item, turnId, completed: !("status" in item) || item.status !== "inProgress",
+            ...(startedAtMs !== null && {startedAtMs}),
+        }));
     }
 }
 

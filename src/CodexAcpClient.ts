@@ -86,8 +86,12 @@ import {
 import {findSupportedEffort} from "./ModelConfigOption";
 import {disableUnsupportedSkills, withoutUnsupportedSkills} from "./UnsupportedSkills";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
-/** A null turn marks unavailable outcome metadata, not a failed turn. */
-export type RecordedSubagentEntry = {item: ThreadItem; completed: boolean; turnId?: string} | {turn: Turn | null};
+/**
+ * A null turn marks unavailable outcome metadata, not a failed turn. `startedAtMs` comes from the item,
+ * or from its turn in a legacy store, which keeps no item times.
+ */
+export type RecordedSubagentEntry =
+    {item: ThreadItem; completed: boolean; turnId?: string; startedAtMs?: number} | {turn: Turn | null};
 
 /**
  * The slice of `thread/resume` the session layer consumes, plus whether Codex
@@ -787,7 +791,7 @@ export class CodexAcpClient {
             history = oneItemPage(legacy.turns.flatMap(turn => turn.items.map(item => ({
                 turnId: turn.id,
                 item,
-                startedAtMs: null,
+                startedAtMs: turnStartedAtMs(turn),
                 completedAtMs: null,
             }))));
         }
@@ -1802,17 +1806,22 @@ async function* oneItemPage<T>(items: T[]): AsyncGenerator<T[]> {
 async function* legacySubagentItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<RecordedSubagentEntry[]> {
     const {thread} = await client.threadRead({threadId, includeTurns: true});
     if (thread.id !== threadId) throw new Error("Subagent history names a different thread");
-    yield thread.turns.flatMap(turn => turn.items.map(item => ({
-        item, turnId: turn.id, completed: recordedItemCompleted(item, turn.status !== "inProgress"),
-    })));
+    yield thread.turns.flatMap(turn => {
+        const startedAtMs = turnStartedAtMs(turn);
+        return turn.items.map(item => ({
+            item, turnId: turn.id, completed: recordedItemCompleted(item, turn.status !== "inProgress"),
+            ...(startedAtMs !== null && {startedAtMs}),
+        }));
+    });
     const turn = thread.turns.at(-1);
     if (turn) yield [{turn}];
 }
 
 async function* paginatedSubagentItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<RecordedSubagentEntry[]> {
     for await (const page of client.threadItemEntryPages(threadId)) {
-        yield page.map(({item, turnId, completedAtMs}) => ({
+        yield page.map(({item, turnId, startedAtMs, completedAtMs}) => ({
             item, turnId, completed: recordedItemCompleted(item, completedAtMs !== null),
+            ...(startedAtMs !== null && {startedAtMs}),
         }));
     }
     try {
@@ -1822,6 +1831,10 @@ async function* paginatedSubagentItems(client: CodexAppServerClient, threadId: s
         logger.error(`Failed to read recorded outcome for subagent ${threadId}`, error);
         yield [{turn: null}];
     }
+}
+
+function turnStartedAtMs(turn: Turn): number | null {
+    return turn.startedAt === null ? null : turn.startedAt * 1000;
 }
 
 function recordedItemCompleted(item: ThreadItem, completed: boolean): boolean {
