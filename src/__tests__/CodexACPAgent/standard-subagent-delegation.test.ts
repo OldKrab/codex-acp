@@ -208,6 +208,108 @@ describe.each([1, 2] as const)("ACP v%s delegated prompts", version => {
         expect(gap()).toEqual([]);
     });
 
+    // Real multi-agent v2 history: the root has activity items and no spawn, the child has no input of its own.
+    function recordTurns(
+        childTurns: Array<[number | null, ThreadItem[]]>,
+        rootTurns: Array<[number | null, ThreadItem[]]> = [
+            [100, [userMessageItem("root", "First"), activity("one", "started")]],
+            [200, [{...userMessageItem("root-2", "Again"), id: "user-2"}, activity("two", "interacted")]],
+        ],
+        childHistoryMode: "legacy" | "paginated" = "legacy",
+    ) {
+        const thread = (id: string) => ({...createThread(), id, parentThreadId: id === worker ? sessionId : null,
+            status: {type: "idle" as const}, turns: [], historyMode: id === worker ? childHistoryMode : "legacy" as const});
+        const turns = (records: typeof childTurns, prefix: string) => records.map(([startedAt, items], index) =>
+            ({...createTurn("completed"), id: `${prefix}-${index}`, startedAt, itemsView: "full" as const, items}));
+        h.setCodexResponse("thread/resume", async params =>
+            ({...codexResponse("thread/start") as object, thread: thread((params as {threadId: string}).threadId)}));
+        h.setCodexResponse("thread/read", async params => {
+            const id = (params as {threadId: string}).threadId;
+            return {thread: {...thread(id), turns: id === sessionId ? turns(rootTurns, "root-turn") : turns(childTurns, "child-turn")}};
+        });
+    }
+
+    it("replays a later root prompt before the child turn that followed it", async () => {
+        await connect();
+        recordTurns([[110, [answer("a1", "One")]], [210, [answer("a2", "Two")]]]);
+        await load();
+        expect(childOrder()).toEqual(["First", "One", "Again", "Two"]);
+        expect(gap()).toEqual([]);
+    });
+
+    it("keeps a child turn whole when a root prompt arrived during it", async () => {
+        await connect();
+        recordTurns([[110, [answer("a1", "One"), answer("a2", "Two")]]]);
+        await load();
+        expect(childOrder()).toEqual(["First", "One", "Two", "Again"]);
+    });
+
+    it("places several prompts between the turns they fall between", async () => {
+        await connect();
+        recordTurns([[110, [answer("a1", "One")]], [120, [answer("a2", "Two")]], [310, [answer("a3", "Three")]]], [
+            [100, [userMessageItem("root", "First"), activity("one", "started")]],
+            [200, [{...userMessageItem("root-2", "Again"), id: "user-2"}, activity("two", "interacted"), activity("three", "interacted")]],
+            [300, [{...userMessageItem("root-3", "Third"), id: "user-3"}, activity("four", "interacted")]],
+        ]);
+        await load();
+        expect(childOrder()).toEqual(["First", "One", "Two", "Again", "Third", "Three"]);
+    });
+
+    it.each([[null, 210], [200, null]] as const)("loses no history when the recorded times are missing (%s, %s)", async (root, child) => {
+        await connect();
+        recordTurns([[110, [answer("a1", "One")]], [child, [answer("a2", "Two")]]], [
+            [100, [userMessageItem("root", "First"), activity("one", "started")]],
+            [root, [{...userMessageItem("root-2", "Again"), id: "user-2"}, activity("two", "interacted")]],
+        ]);
+        await load();
+        expect(childOrder()).toEqual(["First", "One", "Two", "Again"]);
+    });
+
+    /** Pages of one recorded item each, with a read observer: the root's second prompt is at 200 seconds. */
+    function recordPages(onPage: (cursor: string | null) => Promise<void>) {
+        recordTurns([], undefined, "paginated");
+        const page = (id: string, text: string, startedAtMs: number) =>
+            ({item: answer(id, text), turnId: "child-turn", startedAtMs, completedAtMs: startedAtMs + 1});
+        const pages = [page("a1", "One", 110_000), page("a2", "Two", 210_000), page("a3", "Three", 220_000), page("a4", "Four", 230_000)];
+        h.setCodexResponse("thread/items/list", async params => {
+            const {sortDirection, cursor} = params as {sortDirection: string; cursor: string | null};
+            if (sortDirection === "desc") return {data: [pages.at(-1)], nextCursor: null, backwardsCursor: null};
+            await onPage(cursor);
+            const index = Number(cursor ?? 0);
+            return {data: [pages[index]], nextCursor: index < pages.length - 1 ? String(index + 1) : null, backwardsCursor: null};
+        });
+        h.setCodexResponse("thread/turns/list", async () => ({data: []}));
+    }
+
+    it("reads a held child no further than one page ahead of the root", async () => {
+        await connect();
+        const seenAtLastPage: string[] = [];
+        recordPages(async cursor => { if (cursor === "3") seenAtLastPage.push(...childOrder()); });
+        await load();
+        expect(seenAtLastPage).toEqual(["First", "One", "Again", "Two"]);
+        expect(childOrder()).toEqual(["First", "One", "Again", "Two", "Three", "Four"]);
+        expect(gap()).toEqual([]);
+    });
+
+    it("publishes nothing from a held child after the parent closes", async () => {
+        await connect();
+        let release!: () => void;
+        const closed = new Promise<void>(resolve => { release = resolve; });
+        let reading = false;
+        recordPages(async cursor => { if (cursor === "2") { reading = true; await closed; } });
+        const replay = h.request(version === 1 ? "session/load" : "session/resume", {
+            sessionId, cwd, mcpServers: [], ...(version === 2 ? {replayFrom: {type: "start"}} : {}),
+        });
+        void replay.catch(() => {});
+        try {
+            await vi.waitFor(() => expect(reading).toBe(true));
+            await h.request("session/close", {sessionId});
+            release();
+            await expect(replay).rejects.toMatchObject({code: -32600});
+            expect(childOrder()).not.toContain("Three");
+        } finally { release(); }
+    });
+
     it("does not repeat or report the launch prompt a child recorded in its own history", async () => {
         await connect();
         recordHistory([delegated("launch", "Recorded task"), answer("answer", "Recorded answer")]);
