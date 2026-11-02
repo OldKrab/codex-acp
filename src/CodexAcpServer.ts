@@ -3542,15 +3542,16 @@ export class CodexAcpServer {
         const entryPages = pagesStartingWith(firstPage, pages);
         // Hiding the `/review` reviewer prompt is a v2-only change (user decision): v1 keeps
         // showing it, as it always has.
-        const itemPages = untilSessionClose(
-            this.protocolVersion === 2 ? withoutReviewerPrompts(entryPages) : itemsOfEntries(entryPages),
+        const visiblePages = untilSessionClose(
+            this.protocolVersion === 2 ? withoutReviewerPrompts(entryPages) : entryPages,
             isOpen,
         );
         if (this.usesStandardSubagents()) {
             if (sessionState.subagents instanceof StandardSubagentEventRouter) sessionState.subagents.beginHistoryReplay();
-            await this.streamStandardHistory(sessionId, standardHistoryItems(itemPages), sessionState, isOpen);
+            await this.streamStandardHistory(sessionId, standardHistoryEntries(visiblePages), sessionState, isOpen);
             return;
         }
+        const itemPages = itemsOfEntries(visiblePages);
         if (this.supportsNativeSubagents()) {
             await this.streamNativeThreadHistory(
                 sessionId,
@@ -3775,6 +3776,8 @@ export class CodexAcpServer {
         const replayActivity = async (item: ThreadItem & {type: "subAgentActivity"}, turnId?: string): Promise<boolean> => {
             const childId = await router.announceHistory(item.agentThreadId, item.agentPath);
             if (childId === null) return false;
+            // TODO: A child replays whole at its first activity, so a later turn's prompt lands after
+            // all of that child's history. Replaying per turn would keep each prompt before its turn.
             await router.publishActivityPrompt(item.agentThreadId, item.kind, turnId);
             const configOptions = subagentConfigurationOptions(this.subagentModels(state), {model: item.model, effort: item.reasoningEffort});
             if (configOptions.length > 0) {
@@ -5631,11 +5634,11 @@ const REVIEWER_PROMPT_CANDIDATE_MAX_ITEMS = 100;
  * except that T is minted *after* P: its UUIDv7 turn id sorts higher. Only a turn that can be T is
  * held back, until the first item of the next turn decides.
  */
-async function* withoutReviewerPrompts(pages: AsyncIterable<ThreadItemEntry[]>): AsyncGenerator<ThreadItem[]> {
+async function* withoutReviewerPrompts(pages: AsyncIterable<ThreadItemEntry[]>): AsyncGenerator<ThreadItemEntry[]> {
     let turnId: string | null = null;
-    let candidate: {turnId: string; items: ThreadItem[]} | null = null;
+    let candidate: {turnId: string; items: ThreadItemEntry[]} | null = null;
     for await (const page of pages) {
-        const items: ThreadItem[] = [];
+        const items: ThreadItemEntry[] = [];
         for (const entry of page) {
             const item = entry.item;
             const turnStarts = entry.turnId !== turnId;
@@ -5647,14 +5650,14 @@ async function* withoutReviewerPrompts(pages: AsyncIterable<ThreadItemEntry[]>):
                 candidate = null;
             }
             if (turnStarts && item.type === "userMessage" && item.clientId === null) {
-                candidate = {turnId: entry.turnId, items: [item]};
+                candidate = {turnId: entry.turnId, items: [entry]};
                 continue;
             }
             if (candidate === null) {
-                items.push(item);
+                items.push(entry);
                 continue;
             }
-            candidate.items.push(item);
+            candidate.items.push(entry);
             // A turn with its own messages is not a reviewer prompt turn.
             if (item.type === "agentMessage" || item.type === "userMessage"
                 || candidate.items.length >= REVIEWER_PROMPT_CANDIDATE_MAX_ITEMS) {
@@ -5674,9 +5677,9 @@ async function* itemsOfEntries(pages: AsyncIterable<ThreadItemEntry[]>): AsyncGe
     }
 }
 
-async function* standardHistoryItems(pages: AsyncIterable<ThreadItem[]>): AsyncGenerator<RecordedSubagentEntry[]> {
+async function* standardHistoryEntries(pages: AsyncIterable<ThreadItemEntry[]>): AsyncGenerator<RecordedSubagentEntry[]> {
     for await (const page of pages) {
-        yield page.map(item => ({item, completed: !("status" in item) || item.status !== "inProgress"}));
+        yield page.map(({item, turnId}) => ({item, turnId, completed: !("status" in item) || item.status !== "inProgress"}));
     }
 }
 

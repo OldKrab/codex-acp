@@ -113,14 +113,15 @@ describe.each([1, 2] as const)("ACP v%s delegated prompts", version => {
         expect(texts(childId)).toEqual(["Exact words"]);
     });
 
-    function recordHistory(childItems: ThreadItem[] = [answer("answer", "Recorded answer")]) {
+    function recordHistory(
+        childItems: ThreadItem[] = [answer("answer", "Recorded answer")],
+        rootItems: ThreadItem[] = [userMessageItem("root", "Human words"), collab("spawnAgent", "spawn", "Recorded task")],
+    ) {
         const thread = (id: string) => ({...createThread(), id, parentThreadId: id === worker ? sessionId : null, status: {type: "idle" as const}});
         h.setCodexResponse("thread/resume", async params => ({...codexResponse("thread/start") as object, thread: thread((params as {threadId: string}).threadId)}));
         h.setCodexResponse("thread/read", async params => {
             const id = (params as {threadId: string}).threadId;
-            const items: ThreadItem[] = id === sessionId
-                ? [userMessageItem("root", "Human words"), collab("spawnAgent", "spawn", "Recorded task")]
-                : childItems;
+            const items = id === sessionId ? rootItems : childItems;
             return {thread: {...thread(id), turns: [{...createTurn("completed"), itemsView: "full", items}]}};
         });
     }
@@ -138,6 +139,16 @@ describe.each([1, 2] as const)("ACP v%s delegated prompts", version => {
         const child = h.scopedUpdates.filter(entry => entry.sessionId === childId).map(entry => entry.update.sessionUpdate);
         expect(texts(childId)).toEqual(["Recorded task"]);
         expect(child.indexOf("session_message")).toBeLessThan(child.findIndex(kind => kind.includes("agent_message")));
+    });
+
+    it("opens an activity-only child with the root prompt on replay", async () => {
+        await connect();
+        recordHistory([answer("answer", "Recorded answer")],
+            [userMessageItem("root", "Human words"), activity("one", "started"), activity("two", "completed")]);
+        await load();
+        expect(texts(sessionId)).toEqual(["Human words"]);
+        expect(childOrder()).toEqual(["Human words", "Recorded answer"]);
+        expect(gap()).toEqual([]);
     });
 
     it("does not repeat or report the launch prompt a child recorded in its own history", async () => {
