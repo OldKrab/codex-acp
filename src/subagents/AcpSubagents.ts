@@ -1,13 +1,15 @@
 import type {
     ClientCapabilities,
     SessionCapabilities,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 import {
     AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
     clientSupportsAirCapability,
+    isAirClient,
 } from "../AirExtension";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 
-/** Temporary typed surface for agentclientprotocol/agent-client-protocol#1992. */
+/** AIR's private contract, retained independently of standard subagent sessions. */
 export type SubagentSessionCapabilities = {
     cancel?: boolean;
     close?: boolean;
@@ -36,27 +38,22 @@ export type SubagentAwareSessionCapabilities = SessionCapabilities & {
     subagents?: Record<string, never>;
 };
 
-export function clientSupportsSubagents(
+export type StandardSubagentUpdate = Omit<acpV2.SubagentUpdate, "capabilities"> & {
+    sessionUpdate: "subagent_update";
+    capabilities?: Pick<acpV2.SubagentSessionCapabilities, "cancel">;
+};
+
+export function subagentProtocol(
     capabilities?: ClientCapabilities | null,
-): boolean {
+    version: 1 | 2 = 1,
+): "hidden" | "air" | "standard" {
     const subagents = (
         capabilities as (ClientCapabilities & { subagents?: unknown }) | null | undefined
     )?.subagents;
-    if (typeof subagents === "object" && subagents !== null && !Array.isArray(subagents)) {
-        return true;
-    }
-
-    // SDK 1.4 strips the draft top-level capability before the Agent sees it.
-    // Keep the product-scoped fallback until the SDK publishes ACP PR #1992.
-    const openaide = capabilities?._meta?.["openaide"];
-    if (
-        typeof openaide === "object" &&
-        openaide !== null &&
-        !Array.isArray(openaide) &&
-        (openaide as {nativeSubagentSessions?: unknown}).nativeSubagentSessions === true
-    ) {
-        return true;
-    }
-
-    return clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_KEY);
+    const standard = typeof subagents === "object" && subagents !== null && !Array.isArray(subagents);
+    const air = isAirClient(capabilities);
+    if (clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_KEY)
+        || (version === 1 && air && standard)) return "air";
+    if (air) return "hidden";
+    return version === 2 || standard ? "standard" : "hidden";
 }

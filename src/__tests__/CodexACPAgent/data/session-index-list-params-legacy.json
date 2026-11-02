@@ -5,7 +5,6 @@
     "sourceKinds": [
       "cli",
       "vscode",
-      "exec",
       "appServer",
       "unknown"
     ],
@@ -20,7 +19,6 @@
     "sourceKinds": [
       "cli",
       "vscode",
-      "exec",
       "appServer",
       "unknown"
     ],

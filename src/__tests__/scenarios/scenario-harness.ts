@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -144,9 +144,6 @@ async function runInWorkspace(
         approvalPolicy: "never", sandbox: {type: "dangerFullAccess"}, reasoningEffort: model.defaultReasoningEffort,
     });
     anyAppServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread: thread(scenario.history ?? [], workspace)});
-    // These scenarios name children without scripting their stored messages.
-    anyAppServer.threadRead = vi.fn().mockImplementation(({threadId}: {threadId: string}) =>
-        Promise.resolve({thread: {...thread([], workspace), id: threadId, sessionId: threadId}}));
 
     const initializeResponse = await agent.initialize({protocolVersion: 1, clientCapabilities: typeof profile === "string" ? PROFILES[profile] : profile});
     recorded.push({direction: "response", method: "initialize", params: initializeResponse});
