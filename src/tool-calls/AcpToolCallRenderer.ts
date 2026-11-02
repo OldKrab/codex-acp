@@ -31,6 +31,9 @@ export class AcpToolCallRenderer {
         const meta = this.capabilities.airToolCallContract ? this.airMeta(facts) : this.standardMeta(facts);
         if (!this.capabilities.airToolCallContract) {
             applyStandardFields(rendered, facts.standard);
+            if (this.capabilities.standardSubagents && facts.standard?.subagentTitle !== undefined) {
+                rendered["title"] = facts.standard.subagentTitle;
+            }
             const end = facts.standard?.commandEnd;
             if (end !== undefined) {
                 const rawOutput = this.commandEndRawOutput(end);

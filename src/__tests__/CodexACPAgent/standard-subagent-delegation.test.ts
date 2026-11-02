@@ -1,4 +1,4 @@
-import {afterEach, describe, expect, it} from "vitest";
+import {afterEach, describe, expect, it, vi} from "vitest";
 import type {ServerNotification} from "../../app-server";
 import type {ThreadItem} from "../../app-server/v2";
 import {
@@ -41,6 +41,29 @@ describe.each([1, 2] as const)("ACP v%s delegated prompts", version => {
     const childOrder = () => h.scopedUpdates.filter(entry => entry.sessionId === childId).flatMap(({update}) =>
         update.sessionUpdate === "session_message" ? [(update.content as Array<{text: string}>)[0]!.text]
             : update.sessionUpdate === "agent_message_chunk" ? [(update.content as {text: string}).text] : []);
+
+    const titles = () => h.scopedUpdates.flatMap(({update}) => update.sessionUpdate === "subagent_update"
+        && (update as {title?: string}).title !== undefined ? [(update as {title?: string}).title] : []);
+    const readableNickname = (agentNickname: string) => h.setCodexResponse("thread/read", async params => ({thread: {
+        ...createThread(), id: (params as {threadId: string}).threadId, parentThreadId: sessionId, agentNickname,
+        status: {type: "idle" as const}, turns: [],
+    }}));
+
+    it("names a child with no path after its thread's nickname", async () => {
+        await connect();
+        readableNickname("Cicero");
+        h.emit(itemCompleted(collab("spawnAgent", "spawn", "Work")));
+        await vi.waitFor(() => expect(titles()).toEqual(["Cicero"]));
+    });
+
+    it("keeps the name from an agent path over the nickname", async () => {
+        await connect();
+        readableNickname("Cicero");
+        h.emit(itemStarted(activity("one", "started")));
+        await flush();
+        await h.waitForNotifications();
+        expect(titles()).toEqual(["Worker"]);
+    });
 
     it("announces a spawn with no activity item and opens the child with its prompt", async () => {
         await connect();
@@ -86,6 +109,38 @@ describe.each([1, 2] as const)("ACP v%s delegated prompts", version => {
             && (entry.update as {title?: string}).title !== undefined)).toHaveLength(0);
     });
 
+    it("names a replayed child after its thread's nickname", async () => {
+        await connect();
+        recordHistory(undefined, undefined, "Cicero");
+        await load();
+        expect(titles()).toEqual(["Cicero"]);
+    });
+
+    it("keeps the path name of a child restored after the session closed", async () => {
+        await connect();
+        h.emit(itemStarted(activity("one", "started")));
+        await flush();
+        await h.request("session/close", {sessionId});
+        recordHistory(undefined, [activity("one", "started")], "Cicero");
+        await load();
+        expect(titles()).not.toContain("Cicero");
+    });
+
+    it("titles a control tool for the reader, except the names clients match", async () => {
+        await connect();
+        h.emit(itemCompleted(collab("spawnAgent", "spawn", "First")));
+        for (const [tool, id] of [["sendInput", "send"], ["followupTask", "follow"], ["resumeAgent", "resume"],
+            ["closeAgent", "close"], ["wait", "wait"]] as const) {
+            h.emit(itemStarted(collab(tool, id, null, {status: "inProgress"})));
+            h.emit(itemCompleted(collab(tool, id, null)));
+        }
+        await flush();
+        // ACP v2 reports a new row as a `tool_call_update`.
+        const rows = h.scopedUpdates.flatMap(({update}) =>
+            (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") && update.title ? [update.title] : []);
+        expect(rows).toEqual(["Send message to agent", "Send follow-up task to agent", "Resume agent", "Close agent", "wait"]);
+    });
+
     it("opens every activity-only child once with the root prompt that caused it", async () => {
         await connect();
         h.emit(itemStarted(userMessageItem("root", "Check both")));
@@ -116,8 +171,10 @@ describe.each([1, 2] as const)("ACP v%s delegated prompts", version => {
     function recordHistory(
         childItems: ThreadItem[] = [answer("answer", "Recorded answer")],
         rootItems: ThreadItem[] = [userMessageItem("root", "Human words"), collab("spawnAgent", "spawn", "Recorded task")],
+        nickname: string | null = null,
     ) {
-        const thread = (id: string) => ({...createThread(), id, parentThreadId: id === worker ? sessionId : null, status: {type: "idle" as const}});
+        const thread = (id: string) => ({...createThread(), id, parentThreadId: id === worker ? sessionId : null, status: {type: "idle" as const},
+            agentNickname: id === worker ? nickname : null});
         h.setCodexResponse("thread/resume", async params => ({...codexResponse("thread/start") as object, thread: thread((params as {threadId: string}).threadId)}));
         h.setCodexResponse("thread/read", async params => {
             const id = (params as {threadId: string}).threadId;

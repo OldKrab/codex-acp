@@ -17,7 +17,7 @@ import type {SubagentState} from "./AcpSubagents";
 import {
     MODEL_SOURCE_RANK, preferredModel, type ChildModel, type ClosingChildSession, type SubagentModels,
 } from "./CodexSubagentEventRouter";
-import {subagentConfigurationOptions, type ObservedSubagentConfiguration} from "./SubagentConfiguration";
+import {subagentConfigurationOptions, type ObservedSubagentConfiguration, type ObservedSubagentThread} from "./SubagentConfiguration";
 import {isRootAgentPath, nameFromAgentPath, normalizeAgentPath} from "./CodexAgentPath";
 import {PendingNotificationBuffer} from "./PendingNotificationBuffer";
 import {SubagentAssociations, type SubagentAssociation} from "./SubagentAssociations";
@@ -92,7 +92,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         private readonly runningTurnId: (threadId: string) => string | undefined = () => undefined,
         private readonly rootModels: () => SubagentModels | null = () => null,
         private readonly configurationRuntime?: {
-            read(threadId: string, parentThreadId: string): Promise<ObservedSubagentConfiguration | null>;
+            read(threadId: string, parentThreadId: string): Promise<ObservedSubagentThread | null>;
             enqueuePublication(publish: () => Promise<void>): Promise<void>;
         },
     ) {
@@ -419,6 +419,17 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         return child.sessionId;
     }
 
+    /** Multi-agent v1 gives a child no path, so the nickname on its thread is its only name. */
+    async observeNickname(threadId: string, nickname: string | null): Promise<void> {
+        const child = this.children.get(threadId);
+        if (!nickname || !child || child.title !== undefined || child.path !== undefined || this.retired) return;
+        child.title = nickname;
+        if (this.announced.has(threadId)) {
+            await this.session.update({sessionUpdate: "subagent_update", sessionId: child.sessionId, title: nickname},
+                child.parentSessionId);
+        }
+    }
+
     async announceHistory(threadId: string, path: string): Promise<string | null> {
         if (threadId === this.rootSessionId) return null;
         if (await this.restoreKnown(threadId)) {
@@ -477,6 +488,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
             await runtime.enqueuePublication(async () => {
                 if (this.retired || this.configurationRequests.get(child.threadId) !== request) return;
                 await this.observeConfiguration(child.threadId, observed, "threadStarted");
+                await this.observeNickname(child.threadId, observed.nickname);
             });
         } catch (error) { logger.log(`Configuration unavailable for subagent ${child.threadId}`, {error: String(error)}); }
         finally {
