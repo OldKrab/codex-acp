@@ -4,19 +4,14 @@ on:
   push:
     branches:
       - main
-  # Recovery path for a release whose tag exists but whose npm publish or
-  # registry update did not land. See docs/RELEASES.md.
+  # Recovery path for a release whose tag exists but whose npm publish did not
+  # land. See docs/RELEASES.md.
   workflow_dispatch:
     inputs:
       ref:
         description: Tag or commit to publish
         required: true
         type: string
-      publish_npm:
-        description: Publish the package before updating the registry
-        required: true
-        default: true
-        type: boolean
 
 permissions: {}
 
@@ -64,7 +59,7 @@ jobs:
   #
   verify:
     needs: [release-please]
-    if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.publish_npm) || needs.release-please.outputs.release_created == 'true') }}
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -112,29 +107,3 @@ jobs:
       - run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  trigger-registry-update:
-    needs: publish-npm
-    if: ${{ always() && (needs.publish-npm.result == 'success' || (github.event_name == 'workflow_dispatch' && !inputs.publish_npm)) }}
-    runs-on: ubuntu-latest
-    environment: release
-    permissions: {}
-    steps:
-      - name: Generate token scoped to the registry repo
-        uses: actions/create-github-app-token@v3
-        id: registry-token
-        with:
-          app-id: ${{ secrets.REGISTRY_UPDATER_APP_ID }}
-          private-key: ${{ secrets.REGISTRY_UPDATER_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: registry
-
-      - name: Dispatch registry version update
-        env:
-          GH_TOKEN: ${{ steps.registry-token.outputs.token }}
-        run: |
-          gh workflow run update-versions.yml \
-            --repo ${{ github.repository_owner }}/registry \
-            --ref main \
-            -f apply=true \
-            -f agents=codex-acp

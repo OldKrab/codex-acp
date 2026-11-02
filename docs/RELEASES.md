@@ -7,8 +7,7 @@ keeps a single release PR open, titled `chore(main): release X.Y.Z` and labelled
 `autorelease: pending`.
 
 Merging that PR is what releases. It tags `openaide-codex-acp-vX.Y.Z`, creates the GitHub release,
-runs the verification suite, publishes to npm, and dispatches a version update to
-the agent registry.
+runs the verification suite, and publishes to npm.
 
 There is no manual release button, and versions are never typed in by hand: the
 version is an output of the commit history, not an input.
@@ -125,21 +124,17 @@ gh pr edit <pr-number> --remove-label "autorelease: pending" \
 
 Then publish the tag as described below.
 
-### The tag exists but npm or the registry is missing
+### The tag exists but npm is missing
 
 npm publishes through OIDC from inside the workflow, so this cannot be done from
 a laptop. Re-run the publish workflow against the existing tag:
 
 ```sh
-gh workflow run publish.yml -f ref="openaide-codex-acp-v<version>" -f publish_npm=true
+gh workflow run publish.yml -f ref="openaide-codex-acp-v<version>"
 ```
 
 This re-runs `verify` against that ref before publishing, so a flaky e2e run will
 block it; re-run the workflow rather than working around it.
-
-npm versions are immutable. If the package already published and only the
-registry update failed, pass `-f publish_npm=false` so the run skips verification
-and publishing and only re-dispatches the registry update.
 
 ## Upstream updates
 
@@ -166,11 +161,10 @@ conflict fixes, is kept so that work can be carried into the newer update.
 | Secret                                                        | Used for                                                          |
 | ------------------------------------------------------------- | ----------------------------------------------------------------- |
 | `RELEASE_APP_CLIENT_ID`, `RELEASE_APP_PRIVATE_KEY`            | App token for release PRs and tags, so they can trigger workflows |
-| `REGISTRY_UPDATER_APP_ID`, `REGISTRY_UPDATER_APP_PRIVATE_KEY` | App token scoped to the `registry` repository                     |
 | `OPENAI_API_KEY`                                              | The e2e suite in the `verify` job                                 |
 
 Publishing to npm uses OIDC trusted publishing, so there is no npm token. The
-release-please, publish and registry jobs run in the `release` environment.
+release-please and publish jobs run in the `release` environment.
 
 The release GitHub App also needs repository `Contents: write`, `Pull requests:
 write`, and `Workflows: write` permissions. The workflow permission is required
