@@ -185,7 +185,7 @@ import {SubagentAssociations} from "./subagents/SubagentAssociations";
 import {userMessageText} from "./subagents/SubagentDelegationMessages";
 import {SubagentInteractionHandlers} from "./subagents/SubagentInteractionHandlers";
 import type {SubagentEventRouter} from "./subagents/SubagentEventRouter";
-import {subagentConfigurationOptions, type ObservedSubagentConfiguration} from "./subagents/SubagentConfiguration";
+import {subagentConfigurationOptions, type ObservedSubagentThread} from "./subagents/SubagentConfiguration";
 import {listCodexHooks, trustCodexHooks, type CodexHookIdentity} from "./CodexHookTrust";
 import type {HooksListEntry} from "./app-server/v2/HooksListEntry";
 import {
@@ -666,7 +666,7 @@ export class CodexAcpServer {
             ? new StandardSubagentEventRouter(sessionId, session, this.subagentAssociations, release, this.capabilities, replay,
                 this.sessions.get(sessionId)?.subagentTransition,
                 id => this.codexAcpClient.appServerClient.runningTurnId(id), models, {
-                    read: (id, parent) => this.readSubagentConfiguration(id, parent),
+                    read: (id, parent) => this.readSubagentThread(id, parent),
                     enqueuePublication: publish => this.codexAcpClient.enqueueSessionTransition(sessionId, publish),
                 })
             : new CodexSubagentEventRouter(sessionId, this.supportsNativeSubagents(), session, release, models);
@@ -674,10 +674,10 @@ export class CodexAcpServer {
         return router;
     }
 
-    private async readSubagentConfiguration(threadId: string, parentThreadId: string): Promise<ObservedSubagentConfiguration | null> {
+    private async readSubagentThread(threadId: string, parentThreadId: string): Promise<ObservedSubagentThread | null> {
         const {thread} = await this.codexAcpClient.appServerClient.threadRead({threadId});
         if (!thread || thread.id !== threadId || thread.parentThreadId !== parentThreadId || thread.status.type === "notLoaded") return null;
-        return {model: thread.model, effort: thread.reasoningEffort};
+        return {model: thread.model, effort: thread.reasoningEffort, nickname: thread.agentNickname};
     }
 
     private getSubagentInteractionHandlers(router: StandardSubagentEventRouter, rootSessionId: string): SubagentInteractionHandlers {
@@ -3758,6 +3758,7 @@ export class CodexAcpServer {
             try {
                 const history = await this.codexAcpClient.readSubagentHistory(childThreadId);
                 if (!isOpen()) throw new SessionClosedDuringLoadError();
+                await router.observeNickname(childThreadId, history.thread.agentNickname);
                 const parent = router.parentThreadId(childThreadId);
                 if (parent !== undefined) {
                     try {

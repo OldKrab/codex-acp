@@ -57,6 +57,8 @@ export type ToolFacts = {
  */
 export type StandardToolCallFields = {
     title?: string;
+    /** The title for a client with standard subagent sessions, see `ClientCapabilities.standardSubagents`. */
+    subagentTitle?: string;
     kind?: acp.ToolKind;
     status?: acp.ToolCallStatus;
     locations?: string[] | null;

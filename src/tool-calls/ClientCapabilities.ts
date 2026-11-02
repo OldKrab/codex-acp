@@ -6,6 +6,7 @@ import {
     clientSupportsAirCapability,
     isAirClient,
 } from "../AirExtension";
+import {subagentProtocol} from "../subagents/AcpSubagents";
 
 /** The `_meta` key of a command output chunk. */
 type TerminalOutputKey = "terminal_output" | "terminal_output_delta";
@@ -35,6 +36,7 @@ type ClientCapabilityValues = {
     readonly air: AirCapabilities;
     readonly diffPatchFormat: DiffPatchFormat;
     readonly permissionPromptFields: boolean;
+    readonly standardSubagents: boolean;
 };
 
 /**
@@ -54,6 +56,7 @@ export class ClientCapabilities {
         air: {rawInputRendering: false, planContentDelta: false, diffPatch: false},
         diffPatchFormat: "none",
         permissionPromptFields: false,
+        standardSubagents: false,
     });
 
     /** The client declares `_meta.jetbrains.air`. */
@@ -70,6 +73,8 @@ export class ClientCapabilities {
     readonly diffPatchFormat: DiffPatchFormat;
     /** A permission request has its own `title` and `description` (ACP v2). */
     readonly permissionPromptFields: boolean;
+    /** The client shows subagents as sessions, so it renders the delegation tool rows for its reader. */
+    readonly standardSubagents: boolean;
 
     private constructor(values: ClientCapabilityValues) {
         this.airClient = values.airClient;
@@ -80,6 +85,7 @@ export class ClientCapabilities {
         this.air = values.air;
         this.diffPatchFormat = values.diffPatchFormat;
         this.permissionPromptFields = values.permissionPromptFields;
+        this.standardSubagents = values.standardSubagents;
     }
 
     static from(capabilities: acp.ClientCapabilities | null | undefined): ClientCapabilities {
@@ -98,6 +104,7 @@ export class ClientCapabilities {
             },
             diffPatchFormat: diffPatch ? "air" : "none",
             permissionPromptFields: false,
+            standardSubagents: subagentProtocol(capabilities, 1) === "standard",
         });
     }
 
@@ -119,6 +126,7 @@ export class ClientCapabilities {
             air: {rawInputRendering: false, planContentDelta: false, diffPatch: false},
             diffPatchFormat: "acpV2",
             permissionPromptFields: true,
+            standardSubagents: subagentProtocol(capabilities, 2) === "standard",
         });
     }
 
