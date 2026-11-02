@@ -19,22 +19,6 @@
     {
       "sessionId": "compaction-child",
       "update": {
-        "sessionUpdate": "user_message_chunk",
-        "content": {
-          "type": "text",
-          "text": "Continue the delegated task."
-        },
-        "messageId": "collab:spawn-compaction-child:prompt"
-      }
-    }
-  ]
-}
-{
-  "method": "sessionUpdate",
-  "args": [
-    {
-      "sessionId": "compaction-child",
-      "update": {
         "sessionUpdate": "compaction_update",
         "compactionId": "compaction-item",
         "status": "in_progress"

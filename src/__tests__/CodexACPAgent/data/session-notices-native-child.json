@@ -19,22 +19,6 @@
     {
       "sessionId": "notice-child",
       "update": {
-        "sessionUpdate": "user_message_chunk",
-        "content": {
-          "type": "text",
-          "text": "Check the delegated task."
-        },
-        "messageId": "collab:spawn-notice-child:prompt"
-      }
-    }
-  ]
-}
-{
-  "method": "sessionUpdate",
-  "args": [
-    {
-      "sessionId": "notice-child",
-      "update": {
         "sessionUpdate": "notice",
         "severity": "warning",
         "title": "Child integration unavailable"

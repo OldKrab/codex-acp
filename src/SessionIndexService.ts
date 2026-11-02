@@ -5,8 +5,8 @@
  */
 
 import path from "node:path";
-import type * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
 import {clientSupportsAirCapability, withAirMeta} from "./AirExtension";
 import type {ServerNotification} from "./app-server";
@@ -19,12 +19,15 @@ import type {Thread} from "./app-server/v2";
 import {
     AIR_ARCHIVED_KEY,
     AIR_SESSION_ARCHIVE_KEY,
+    AIR_SESSION_BATCH_GET_KEY,
     AIR_SESSION_INDEX_KEY,
     AIR_SESSION_LIST_SUBSCRIBE_KEY,
     AIR_SESSION_RENAME_KEY,
+    AIR_SESSION_WORKTREES_KEY,
     readSessionIndexListOptions,
     readSessionIndexPage,
     SESSION_ARCHIVE_METHOD,
+    SESSION_BATCH_GET_METHOD,
     SESSION_LIST_CHANGES_METHOD,
     SESSION_LIST_SUBSCRIBE_METHOD,
     SESSION_LIST_UNSUBSCRIBE_METHOD,
@@ -33,16 +36,19 @@ import {
     SessionIndexActivity,
     sessionIndexSessionInfo,
     type SessionArchiveRequest,
+    type SessionBatchGetRequest,
+    type SessionBatchGetResponse,
     type SessionIndexListOptions,
     type SessionRenameRequest,
 } from "./SessionIndex";
 import {deleteThread, sessionIndexRequestError, setThreadArchived} from "./SessionIndexMutations";
 import {SessionIndexTitles} from "./SessionIndexTitles";
-import {canonicalCwds, linkedWorktreeCwds} from "./SessionIndexWorktrees";
+import {canonicalCwds, CodexWorktreeMarks, isUncPath, linkedWorktreeCwds} from "./SessionIndexWorktrees";
 import {SessionForkOrigins} from "./SessionForkOrigins";
 import {SessionListSubscriptions, type SessionListSubscriptionTimings, type ThreadEntry} from "./SessionListSubscriptions";
 import {SessionWriteQueue} from "./SessionWriteQueue";
 import type {SerializeTitleWrite} from "./TitleGenerator";
+import {readSessionBatchMetadata} from "./SessionBatchGet";
 
 /** What the session index needs from `CodexAcpServer`. */
 export interface SessionIndexHost {
@@ -74,17 +80,20 @@ export class SessionIndexService {
     private anyClientObserved = false;
     /** The threads whose last row had a state, as listed or sent: loaded here. */
     private readonly rowsWithState = new Set<string>();
+    /** Whether a cwd lies in a worktree that Codex made, read from the disk at most once a minute per cwd. */
+    private readonly codexWorktrees = new CodexWorktreeMarks();
 
     constructor(private readonly host: SessionIndexHost, subscriptionTimings?: SessionListSubscriptionTimings) {
         this.activity = new SessionIndexActivity(threadId => host.session(threadId) !== undefined);
         this.titles = new SessionIndexTitles(host, this.writes);
-        // `thread/list` gives no fork parent: a row gets it once the rollout is read, a subscription with a change.
-        this.forkOrigins = new SessionForkOrigins({onFound: (threadIds) => this.subscriptions.threadsChanged(threadIds)});
+        const reader = () => {
+            const appServer = host.client().appServerClient;
+            return appServer.connectionLoss.lost ? null : appServer;
+        };
+        // `thread/list` gives no fork parent: a row gets it once `thread/read` gave it, a subscription with a change.
+        this.forkOrigins = new SessionForkOrigins({reader, onFound: (threadIds) => this.subscriptions.threadsChanged(threadIds)});
         this.subscriptions = new SessionListSubscriptions({
-            reader: () => {
-                const appServer = host.client().appServerClient;
-                return appServer.connectionLoss.lost ? null : appServer;
-            },
+            reader,
             codexHome: () => host.client().getHomePath(),
             rows: async (entries) => await this.rows(entries),
             // The canonical path too outside a Git checkout, where linkedWorktreeCwds gives the cwd alone.
@@ -103,11 +112,12 @@ export class SessionIndexService {
 
     /**
      * The AIR capabilities to answer: only a client that declares `sessionIndex` gets them. `sessionArchive` and
-     * `sessionRename` name the requests that come with it; the client need not declare them.
+     * `sessionRename` name the requests that come with it, `sessionWorktrees` the `agentWorktree` row field; the
+     * client need not declare them.
      */
     agentCapabilities(): string[] {
         return this.enabled
-            ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY, AIR_SESSION_LIST_SUBSCRIBE_KEY]
+            ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_BATCH_GET_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY, AIR_SESSION_LIST_SUBSCRIBE_KEY, AIR_SESSION_WORKTREES_KEY]
             : [];
     }
 
@@ -153,6 +163,19 @@ export class SessionIndexService {
         return await this.readRows(cwd, options, params.cursor ?? null);
     }
 
+    /** Metadata only: no adapter list paging, session load/resume or history replay. */
+    async batchGet({sessionIds}: SessionBatchGetRequest): Promise<SessionBatchGetResponse> {
+        this.require(SESSION_BATCH_GET_METHOD);
+        if (sessionIds.length === 0) return {sessions: []};
+        await this.host.ensureAppServer();
+        const client = this.host.client();
+        const entries = await this.host.runWithProcessCheck(() => readSessionBatchMetadata(
+            client.appServerClient, client.getHomePath(), sessionIds,
+        ));
+        // `thread/read` gives the fork parent, so the rows need no background read for it.
+        return {sessions: await this.rows(entries.map(entry => ({...entry, read: true as const})), true)};
+    }
+
     /**
      * `_session/list/subscribe {cwd}`: answers `{subscriptionId}` and then sends `_session/list/changes` for the
      * threads of the cwd and its worktrees, see `SessionListSubscriptions`.
@@ -179,6 +202,30 @@ export class SessionIndexService {
         }
         this.subscriptions.unsubscribe(subscriptionId);
         return {};
+    }
+
+    /**
+     * Runs `fork`, a `session/fork` request of a thread. The list subscriptions hold back the rows of its forks until
+     * its response is out, see {@link SessionListSubscriptions.forkStarted}.
+     */
+    async forking<T>(sourceId: string, fork: () => Promise<T>): Promise<T> {
+        this.subscriptions.forkStarted(sourceId);
+        try {
+            return await fork();
+        } finally {
+            // The response goes out when the handler returns, before any timer.
+            setTimeout(() => this.subscriptions.forkAnswered(sourceId), 0);
+        }
+    }
+
+    /**
+     * `thread/fork` of a source answered with the thread of the fork. Every row of the fork carries `forkedFrom` from
+     * now on, also a row of `thread/list`, which answers no `forkedFromId`. The list subscriptions hold the fork back
+     * by its id until the fork response is out.
+     */
+    forkCreated(sourceId: string, forkId: string): void {
+        this.forkOrigins.remember(forkId, sourceId);
+        this.subscriptions.forkCreated(sourceId, forkId);
     }
 
     /** The subscriptions of the connection, for tests. */
@@ -289,15 +336,21 @@ export class SessionIndexService {
             relativeCwd === null ? undefined : (thread) => arePathBasenamesEqual(thread.cwd, relativeCwd),
             cwd === null || relativeCwd !== null ? cwd : path.resolve(cwd),
         ));
-        return {sessions: await this.rows(page.threads), nextCursor: page.nextCursor};
+        // A list of every cwd does not read the Git files of each network share that a thread ran in.
+        return {sessions: await this.rows(page.threads, cwds === null), nextCursor: page.nextCursor};
     }
 
     /**
      * The list rows of threads, for `session/list` and `_session/list/changes` alike. A row has the fork parent
-     * known for its thread; one that is not read yet is read in the background, see `SessionForkOrigins`.
+     * known for its thread; one that is not read yet is read in the background, see `SessionForkOrigins`. A row
+     * whose cwd lies in a worktree that Codex made says so, see `CodexWorktreeMarks`. With `skipUncCwds`, a row whose
+     * cwd is a UNC path, such as `\\wsl.localhost\…`, is not checked and not marked.
      */
-    private async rows(entries: ThreadEntry[]): Promise<acp.SessionInfo[]> {
+    private async rows(entries: ThreadEntry[], skipUncCwds = false): Promise<acp.SessionInfo[]> {
+        const inAgentWorktree = (cwd: string): boolean =>
+            !(skipUncCwds && isUncPath(cwd)) && this.codexWorktrees.isCodexWorktreeCwd(cwd);
         return entries.map(entry => {
+            if (entry.read) this.forkOrigins.readElsewhere(entry.thread);
             const forkedFromId = this.forkOrigins.originOf(entry.thread);
             const thread = forkedFromId === entry.thread.forkedFromId ? entry.thread : {...entry.thread, forkedFromId};
             const activity = this.activity.activityOf(thread);
@@ -305,7 +358,7 @@ export class SessionIndexService {
             if (activity?.state !== undefined) this.rowsWithState.add(thread.id);
             else this.rowsWithState.delete(thread.id);
             return this.withActiveAdditionalDirectories(
-                sessionIndexSessionInfo(thread, entry.archived, activity),
+                sessionIndexSessionInfo(thread, entry.archived, activity, inAgentWorktree(thread.cwd)),
             );
         });
     }

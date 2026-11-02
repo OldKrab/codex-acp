@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import fs from "node:fs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
@@ -423,7 +423,6 @@ describe("subagents", () => {
     it("air: gets the child session before the child output, and the child state on the parent", () => {
         expect(timeline("air", "native-subagent-session")).toEqual([
             "session-1 subagent_spawned child-thread",
-            "child-thread user_message_chunk",
             "child-thread tool_call child-cmd",
             "child-thread tool_call_update child-cmd",
             "child-thread tool_call_update child-cmd",
@@ -437,9 +436,7 @@ describe("subagents", () => {
     it("air: gets a nested child on its immediate parent", () => {
         expect(timeline("air", "nested-subagent-session")).toEqual([
             "session-1 subagent_spawned child-thread",
-            "child-thread user_message_chunk",
             "child-thread subagent_spawned grandchild-thread",
-            "grandchild-thread user_message_chunk",
             "grandchild-thread tool_call grandchild-cmd",
             "grandchild-thread tool_call_update grandchild-cmd",
             "grandchild-thread agent_message_chunk",
@@ -451,7 +448,6 @@ describe("subagents", () => {
     it("air: gets no child update after the child ends", () => {
         expect(timeline("air", "late-subagent-update")).toEqual([
             "session-1 subagent_spawned child-thread",
-            "child-thread user_message_chunk",
             "child-thread tool_call child-cmd",
             "session-1 subagent_state_update child-thread",
         ]);
@@ -481,7 +477,7 @@ describe("subagents", () => {
         it(`air: gets a replayed ${tool} as the tool call that the live session reports`, async () => {
             const endState = tool === "closeAgent" ? "completed" : "running";
             const spawn = collab("spawn-1", "spawnAgent", "completed", "running");
-            const activity = {type: "subAgentActivity", id: "act-1", kind: "started", agentThreadId: CHILD_THREAD_ID, agentPath: "/root/weather"};
+            const activity = {type: "subAgentActivity", model: null, reasoningEffort: null, id: "act-1", kind: "started", agentThreadId: CHILD_THREAD_ID, agentPath: "/root/weather"};
             const control = (status: "inProgress" | "completed", state: "running" | "completed") =>
                 collab("control-1", tool, status, state, SESSION_ID, CHILD_THREAD_ID, "Use Celsius.");
             const reported = async (each: Scenario) => normalize(await runScenario(each, "air"))
