@@ -182,6 +182,7 @@ import {
 import {isRootAgentPath, nameFromAgentPath} from "./subagents/CodexAgentPath";
 import {StandardSubagentEventRouter} from "./subagents/StandardSubagentEventRouter";
 import {SubagentAssociations} from "./subagents/SubagentAssociations";
+import {userMessageText} from "./subagents/SubagentDelegationMessages";
 import {SubagentInteractionHandlers} from "./subagents/SubagentInteractionHandlers";
 import type {SubagentEventRouter} from "./subagents/SubagentEventRouter";
 import {subagentConfigurationOptions, type ObservedSubagentConfiguration} from "./subagents/SubagentConfiguration";
@@ -3784,6 +3785,7 @@ export class CodexAcpServer {
             return true;
         };
         let unresolved: Array<ThreadItem & {type: "subAgentActivity"}> = [];
+        let launchPrompt = router.launchPrompt(threadId);
         for await (const items of pages) {
             for (const entry of items) {
                 if (!isOpen()) throw new SessionClosedDuringLoadError();
@@ -3811,11 +3813,15 @@ export class CodexAcpServer {
                     }
                     continue;
                 }
-                // TODO: Replay later delegated prompts too once child history replays run by run; each child
-                // replays whole at its spawn, so a follow-up prompt would land after the work it caused.
                 if (threadId !== state.sessionId) {
-                    // Agent-owned input is not an ordinary human message. Incomplete text has no safe delta cursor.
-                    if (item.type === "userMessage" || (!completed && !supportsPartialHistory(item))) {
+                    // Agent-owned input is not an ordinary human message, and a fork inherits older input before the launch.
+                    if (item.type === "userMessage") {
+                        if (userMessageText(item) === launchPrompt) launchPrompt = undefined;
+                        else if (!await router.publishRecordedPrompt(threadId, item)) gaps.add(threadId);
+                        continue;
+                    }
+                    // Incomplete text has no safe delta cursor.
+                    if (!completed && !supportsPartialHistory(item)) {
                         gaps.add(threadId);
                         continue;
                     }
