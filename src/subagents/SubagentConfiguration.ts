@@ -5,7 +5,7 @@ import type {SubagentModels} from "./CodexSubagentEventRouter";
 
 /** What a read of a child's thread yields. The nickname Codex gives a thread can name its child. */
 export type ObservedSubagentThread = ObservedSubagentConfiguration & {nickname: string | null};
-export type ObservedSubagentConfiguration = {model: string | null; effort: ReasoningEffort | null};
+export type ObservedSubagentConfiguration = {model: string | null; effort: ReasoningEffort | null; cwd?: string};
 
 /** Complete reported snapshots contain only observed child values and singleton choices. */
 export function subagentConfigurationOptions(
