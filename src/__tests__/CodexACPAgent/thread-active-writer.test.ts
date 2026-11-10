@@ -86,7 +86,8 @@ describe("a thread that another Codex client has loaded", () => {
 
         await expect(load).rejects.toBeInstanceOf(acp.RequestError);
         await expect(load).rejects.toMatchObject(expectedError);
-        expect(appServer.threadRead).not.toHaveBeenCalled();
+        // Only the saved-permission read runs; the fallback for an unwritten thread does not.
+        expect(vi.mocked(appServer.threadRead).mock.calls).toEqual([[{threadId, includeTurns: false}]]);
         expect(() => agent.getSessionState(threadId)).toThrow(`Session ${threadId} not found`);
     });
 
@@ -98,7 +99,8 @@ describe("a thread that another Codex client has loaded", () => {
 
         await expect(resume).rejects.toBeInstanceOf(acp.RequestError);
         await expect(resume).rejects.toMatchObject(expectedError);
-        expect(appServer.threadRead).not.toHaveBeenCalled();
+        // Only the saved-permission read runs; the fallback for an unwritten thread does not.
+        expect(vi.mocked(appServer.threadRead).mock.calls).toEqual([[{threadId, includeTurns: false}]]);
         expect(() => agent.getSessionState(threadId)).toThrow(`Session ${threadId} not found`);
     });
 

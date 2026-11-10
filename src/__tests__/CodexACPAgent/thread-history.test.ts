@@ -116,7 +116,9 @@ describe("paginated thread history", () => {
         expect(loaded.thread.turns).toEqual([]);
         expect(await collect(loaded.history)).toEqual(expectedIds);
         expect(loaded.thread.name).toBe(mode === "paginated" ? "Resume metadata" : "Later metadata");
-        expect(read.mock.calls).toEqual(mode === "paginated" ? [] : [
+        // The first read looks up the saved permissions before resume.
+        expect(read.mock.calls).toEqual(mode === "paginated" ? [[{threadId: "history", includeTurns: false}]] : [
+            [{threadId: "history", includeTurns: false}],
             [{threadId: "history"}],
             [{threadId: "history", includeTurns: true}],
         ]);

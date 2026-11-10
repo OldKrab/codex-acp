@@ -938,7 +938,9 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(codexAppServerClient.getThreadSettings("thread-id")).toBeUndefined();
     });
 
-    it('uses configured model provider when resuming sessions without an explicit provider', async () => {
+    // Any provider on resume stops native Codex from restoring the session's saved model
+    // and reasoning effort (agentclientprotocol/codex-acp#343); native restores the provider too.
+    it('leaves the saved model provider to native resume when the adapter has none of its own', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
@@ -974,8 +976,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             mcpServers: [],
         });
 
-        expect(threadResumeSpy.mock.calls[0]![0].modelProvider).toBe("azure");
-        expect(threadResumeSpy.mock.calls[1]![0].modelProvider).toBe("azure");
+        expect(threadResumeSpy.mock.calls[0]![0]).not.toHaveProperty("modelProvider");
+        expect(threadResumeSpy.mock.calls[1]![0]).not.toHaveProperty("modelProvider");
     });
 
     it('tracks configured model provider auth state for resumed and loaded sessions', async () => {
@@ -1021,8 +1023,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             mcpServers: [],
         });
 
-        expect(threadResumeSpy.mock.calls[0]![0].modelProvider).toBe("azure");
-        expect(threadResumeSpy.mock.calls[1]![0].modelProvider).toBe("azure");
+        expect(threadResumeSpy.mock.calls[0]![0]).not.toHaveProperty("modelProvider");
+        expect(threadResumeSpy.mock.calls[1]![0]).not.toHaveProperty("modelProvider");
         expect(getAccountSpy).not.toHaveBeenCalled();
         expect(codexAcpAgent.getSessionState("resume-id")).toMatchObject({
             account: null,

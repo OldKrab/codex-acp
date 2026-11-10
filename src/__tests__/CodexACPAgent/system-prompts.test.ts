@@ -87,8 +87,10 @@ describe.each([1, 2] as const)("client system prompts over ACP v%s", (version) =
         for (const systemPrompt of [undefined, null, prompt("Keep")]) {
             await client.request("session/resume", {sessionId, cwd, mcpServers: [], ...(systemPrompt === undefined ? {} : {systemPrompt})});
         }
-        expect(calls.map(call => call.method)).toEqual(["thread/resume", "thread/resume", "thread/resume"]);
-        expect(calls.map(call => call.params.developerInstructions)).toEqual(Array(3).fill("Configured instructions\n\nKeep"));
+        // Each resume first reads the thread for its saved permissions.
+        expect(calls.map(call => call.method)).toEqual(Array(3).fill(["thread/read", "thread/resume"]).flat());
+        expect(calls.filter(call => call.method === "thread/resume").map(call => call.params.developerInstructions))
+            .toEqual(Array(3).fill("Configured instructions\n\nKeep"));
     });
 
     it("applies instructions on the history replay path", async () => {

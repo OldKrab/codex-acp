@@ -167,7 +167,8 @@ describe("sessions Codex has not materialized on disk", () => {
             cwd: "/test/cwd",
             mcpServers: [],
         })).rejects.toThrow("transport closed");
-        expect(appServer.threadRead).not.toHaveBeenCalled();
+        // Only the saved-permission read runs; the fallback for an unwritten thread does not.
+        expect(vi.mocked(appServer.threadRead).mock.calls).toEqual([[{threadId, includeTurns: false}]]);
     });
 
     it("deletes a session that has no persisted rollout", async () => {

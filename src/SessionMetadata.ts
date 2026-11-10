@@ -27,6 +27,8 @@ export type SessionMetadata = {
     approvalPolicy?: AskForApproval,
     approvalsReviewer?: ApprovalsReviewer,
     permissionProfiles?: PermissionProfileSummary[],
+    /** The approval settings a resume or load restored; absent for new sessions. */
+    resumedApproval?: {approvalPolicy: AskForApproval, approvalsReviewer: ApprovalsReviewer},
 }
 
 export type SessionMetadataWithThread = SessionMetadata & {

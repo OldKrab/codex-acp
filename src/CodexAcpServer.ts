@@ -1380,10 +1380,14 @@ export class CodexAcpServer {
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);
         if (this.setupResponseOrdering && operation !== "resume") this.clientDelivery.beginSessionSetup(sessionId);
-        const availableAgentModes = AgentMode.all(
-            sessionMetadata.permissionProfiles,
-            sessionMetadata.approvalPolicy,
-            sessionMetadata.approvalsReviewer,
+        const {agentMode: initialAgentMode, availableAgentModes} = AgentMode.forResumedSession(
+            AgentMode.all(
+                sessionMetadata.permissionProfiles,
+                sessionMetadata.approvalPolicy,
+                sessionMetadata.approvalsReviewer,
+            ),
+            sessionMetadata.activePermissionProfileId ?? null,
+            sessionMetadata.resumedApproval,
         );
         const sessionState: SessionState = {
             sessionId: sessionId,
@@ -1391,10 +1395,7 @@ export class CodexAcpServer {
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
-            agentMode: AgentMode.getInitialAgentMode(
-                availableAgentModes,
-                sessionMetadata.activePermissionProfileId,
-            ),
+            agentMode: initialAgentMode,
             availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
@@ -3613,10 +3614,14 @@ export class CodexAcpServer {
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
         const currentModel = this.findCurrentModel(models, currentModelId);
         const currentModelSupportsFast = modelSupportsFast(currentModel);
-        const availableAgentModes = AgentMode.all(
-            sessionMetadata.permissionProfiles,
-            sessionMetadata.approvalPolicy,
-            sessionMetadata.approvalsReviewer,
+        const {agentMode: initialAgentMode, availableAgentModes} = AgentMode.forResumedSession(
+            AgentMode.all(
+                sessionMetadata.permissionProfiles,
+                sessionMetadata.approvalPolicy,
+                sessionMetadata.approvalsReviewer,
+            ),
+            sessionMetadata.activePermissionProfileId ?? null,
+            sessionMetadata.resumedApproval,
         );
         const sessionState: SessionState = {
             sessionId: sessionId,
@@ -3624,10 +3629,7 @@ export class CodexAcpServer {
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
-            agentMode: AgentMode.getInitialAgentMode(
-                availableAgentModes,
-                sessionMetadata.activePermissionProfileId,
-            ),
+            agentMode: initialAgentMode,
             availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,
             currentTurnId: null,
