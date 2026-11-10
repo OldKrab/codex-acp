@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.3.0](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v2.2.4...openaide-codex-acp-v2.3.0) (2026-11-10)
+
+
+### Features
+
+* sync upstream v2.6.0 ([#57](https://github.com/OldKrab/codex-acp/issues/57)) ([5a8cd77](https://github.com/OldKrab/codex-acp/commit/5a8cd77c2866f31d48a65b1b8cef49cb60c5ae35))
+
+
+### Bug Fixes
+
+* restore a resumed session's own permissions and model ([#58](https://github.com/OldKrab/codex-acp/issues/58)) ([4cffde9](https://github.com/OldKrab/codex-acp/commit/4cffde978757cd0332f6c3a57e167207bfafc62d))
+
 ## [2.2.4](https://github.com/OldKrab/codex-acp/compare/openaide-codex-acp-v2.2.3...openaide-codex-acp-v2.2.4) (2026-11-02)
 
 
