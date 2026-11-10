@@ -684,7 +684,7 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/name/set", params });
     }
 
-    async threadResume(params: ThreadResumeParams): Promise<ExperimentalThreadResumeResponse> {
+    async threadResume(params: ExperimentalThreadResumeParams): Promise<ExperimentalThreadResumeResponse> {
         return await this.sendRequest({ method: "thread/resume", params: params });
     }
 
@@ -1408,6 +1408,12 @@ type ExperimentalThreadPermissions = {
 export type ExperimentalThreadStartResponse = ThreadStartResponse & ExperimentalThreadPermissions;
 export type ExperimentalThreadResumeResponse = ThreadResumeResponse & ExperimentalThreadPermissions;
 export type ExperimentalThreadForkResponse = ThreadForkResponse & ExperimentalThreadPermissions;
+
+/** `permissions` names a permission profile; its roots are the session's workspace roots. */
+export type ExperimentalThreadResumeParams = ThreadResumeParams & {
+    permissions?: string | null;
+    runtimeWorkspaceRoots?: string[] | null;
+};
 
 export type ExperimentalTurnStartParams = TurnStartParams & {
     permissions?: string | null;

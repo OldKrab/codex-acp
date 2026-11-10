@@ -14,6 +14,7 @@ import type {
     ApprovalHandler,
     CodexAppServerClient,
     ElicitationHandler,
+    ExperimentalThreadResumeParams,
 } from "./CodexAppServerClient";
 import type {McpServerStartupWaitOptions, McpStartupResult} from "./mcp/McpStartupTracker";
 import open from "open";
@@ -92,6 +93,7 @@ import {
     narrowToListedModels,
 } from "./GatewayModelDiscovery";
 import {findSupportedEffort} from "./ModelConfigOption";
+import {readSavedPermissions, unsupported as unsupportedSavedPermissions} from "./SavedSessionPermissions";
 import {type ProviderStartupConfig, configOverride, NO_PROVIDER_STARTUP_CONFIG} from "./CodexConfigOverride";
 import {disableUnsupportedSkills, withoutUnsupportedSkills} from "./UnsupportedSkills";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
@@ -113,6 +115,9 @@ type ResumedThread = {
     reasoningEffort: ReasoningEffort | null;
     serviceTier: string | null;
     activePermissionProfileId: string | null;
+    /** The approval settings the resume restored. Null when the thread has no rollout yet. */
+    approvalPolicy: AskForApproval | null;
+    approvalsReviewer: ApprovalsReviewer | null;
     itemsBackwardsCursor: string | null;
     materialized: boolean;
     /** The mode that the resume response reports. Null when the thread has no rollout yet. */
@@ -644,9 +649,15 @@ export class CodexAcpClient {
      * A thread that another Codex client has loaded fails with a clear ACP
      * error instead of the raw Codex message.
      */
-    private async resumeThread(params: ThreadResumeParams): Promise<ResumedThread> {
+    /**
+     * @param detachedThread the thread as read before the caller detached it, so that
+     * this resume loads it from disk; resume reads it itself when omitted.
+     */
+    private async resumeThread(params: ThreadResumeParams, workspaceRoots?: string[], detachedThread?: Thread): Promise<ResumedThread> {
         try {
-            const response = await this.codexClient.threadResume(params);
+            const saved = await this.savedPermissionsOverride(params.threadId, workspaceRoots, detachedThread);
+            const response = await this.codexClient.threadResume({...params, ...saved.overrides});
+            await this.verifyRestoredProfile(params.threadId, saved.profileId, response.activePermissionProfile?.id ?? null);
             return {
                 thread: response.thread,
                 model: response.model,
@@ -654,6 +665,8 @@ export class CodexAcpClient {
                 reasoningEffort: response.reasoningEffort,
                 serviceTier: response.serviceTier,
                 activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+                approvalPolicy: response.approvalPolicy,
+                approvalsReviewer: response.approvalsReviewer,
                 itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
                 materialized: true,
                 collaborationMode: response.collaborationMode?.mode ?? null,
@@ -678,6 +691,8 @@ export class CodexAcpClient {
                 serviceTier: null,
                 // thread/read omits permissions; callers restore the config default before the first prompt.
                 activePermissionProfileId: null,
+                approvalPolicy: null,
+                approvalsReviewer: null,
                 // An unmaterialized thread has no persisted history to hydrate:
                 // `thread/turns/list` rejects it outright ("not materialized
                 // yet"), and there is nothing to list either way.
@@ -686,6 +701,71 @@ export class CodexAcpClient {
                 collaborationMode: null,
             };
         }
+    }
+
+    /**
+     * The resume overrides that keep the permissions this thread was saved with.
+     * See {@link readSavedPermissions} for why native resume needs them. The history
+     * must be read before resume, which records the settings it resumed with.
+     */
+    private async savedPermissionsOverride(
+        threadId: string,
+        workspaceRoots: string[] | undefined,
+        detachedThread: Thread | undefined,
+    ): Promise<{
+        overrides: Pick<ExperimentalThreadResumeParams, "permissions" | "runtimeWorkspaceRoots">,
+        /** The profile the resumed thread must report, or null when nothing was saved. */
+        profileId: string | null,
+    }> {
+        // A thread Codex cannot read fails resume with its own, clearer error; a thread
+        // that is not on disk yet resumes from its live state. Neither has saved settings.
+        let thread = detachedThread;
+        if (thread === undefined) {
+            try {
+                thread = (await this.codexClient.threadRead({threadId, includeTurns: false}))?.thread;
+            } catch (error) {
+                logger.log("Thread read failed; resuming without saved permissions", {
+                    operation: "codex.saved_permissions_read", threadId, outcome: "skipped",
+                    errorCode: (error as {code?: unknown})?.code ?? null,
+                });
+            }
+            // A loaded thread ignores resume overrides and keeps its live settings.
+            if (thread?.status?.type !== "notLoaded") return {overrides: {}, profileId: null};
+        }
+        if (!thread || thread.path === null) return {overrides: {}, profileId: null};
+        const saved = await readSavedPermissions(thread.path, threadId);
+        switch (saved.kind) {
+            case "none":
+                return {overrides: {}, profileId: null};
+            case "native":
+                return {overrides: {}, profileId: saved.profileId};
+            case "preset":
+                return {
+                    overrides: {
+                        permissions: saved.profile,
+                        ...(saved.profile === ":workspace" ? {runtimeWorkspaceRoots: workspaceRoots ?? [thread.cwd]} : {}),
+                    },
+                    profileId: saved.profile,
+                };
+        }
+    }
+
+    /**
+     * Native resume falls back to the current config when a saved named profile no
+     * longer exists, which can widen the session's access. Refuse such a resume and
+     * release the thread it subscribed.
+     */
+    private async verifyRestoredProfile(threadId: string, expected: string | null, restored: string | null): Promise<void> {
+        if (expected === null || expected === restored) return;
+        logger.log("Resumed thread lost its saved permission profile", {
+            operation: "codex.saved_permissions_verify", threadId, outcome: "failure",
+            expectedProfile: expected.startsWith(":") ? expected : "custom",
+            restoredProfile: restored === null ? null : restored.startsWith(":") ? restored : "custom",
+        });
+        await this.codexClient.threadUnsubscribe({threadId}).catch(error => {
+            logger.error(`Failed to release thread ${threadId} after a permission restore failure`, error);
+        });
+        throw unsupportedSavedPermissions();
     }
 
     async resumeSession(
@@ -703,10 +783,13 @@ export class CodexAcpClient {
             excludeTurns: true,
             config,
             cwd: request.cwd,
-            modelProvider: await this.getResumeModelProvider(),
+            // Any provider here stops native resume from restoring the session's saved
+            // model and reasoning effort, so pass one only when it was configured
+            // (agentclientprotocol/codex-acp#343).
+            ...(this.getModelProvider() !== null ? {modelProvider: this.getModelProvider()} : {}),
             threadId: request.sessionId,
             ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
-        }, request, previousInstructions);
+        }, request, previousInstructions, [request.cwd, ...additionalDirectories]);
         onSubscribed?.();
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
@@ -724,6 +807,9 @@ export class CodexAcpClient {
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
+            ...(response.approvalPolicy !== null && response.approvalsReviewer !== null
+                ? {resumedApproval: {approvalPolicy: response.approvalPolicy, approvalsReviewer: response.approvalsReviewer}}
+                : {}),
             ...permissionProfileMetadata,
         }
     }
@@ -766,10 +852,13 @@ export class CodexAcpClient {
             excludeTurns: true,
             config,
             cwd: request.cwd,
-            modelProvider: await this.getResumeModelProvider(),
+            // Any provider here stops native resume from restoring the session's saved
+            // model and reasoning effort, so pass one only when it was configured
+            // (agentclientprotocol/codex-acp#343).
+            ...(this.getModelProvider() !== null ? {modelProvider: this.getModelProvider()} : {}),
             threadId: request.sessionId,
             ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
-        }, request, previousInstructions);
+        }, request, previousInstructions, [request.cwd, ...additionalDirectories]);
         onSubscribed?.();
         // Resume cursors bound durable history; later turns arrive through live events.
         // A null paginated cursor means there was no durable history at resume time.
@@ -809,6 +898,9 @@ export class CodexAcpClient {
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
+            ...(response.approvalPolicy !== null && response.approvalsReviewer !== null
+                ? {resumedApproval: {approvalPolicy: response.approvalPolicy, approvalsReviewer: response.approvalsReviewer}}
+                : {}),
             ...permissionProfileMetadata,
         };
     }
@@ -927,10 +1019,11 @@ export class CodexAcpClient {
         params: ThreadResumeParams,
         request: {sessionId: string; systemPrompt?: unknown; _meta?: unknown},
         previous?: SessionInstructions,
+        workspaceRoots?: string[],
     ): Promise<ResumedThread> {
-        if (!changesSystemPrompt(request, previous)) return this.resumeThread(params);
+        if (!changesSystemPrompt(request, previous)) return this.resumeThread(params, workspaceRoots);
         const {thread} = await this.codexClient.threadRead({threadId: request.sessionId});
-        if (thread.status.type === "notLoaded") return this.resumeThread(params);
+        if (thread.status.type === "notLoaded") return this.resumeThread(params, workspaceRoots, thread);
         if (thread.status.type !== "idle" || thread.path === null) {
             throw acp.RequestError.invalidParams(
                 undefined,
@@ -962,7 +1055,7 @@ export class CodexAcpClient {
         try {
             await this.codexClient.threadUnsubscribe({threadId: request.sessionId});
             detached = true;
-            const response = await this.resumeThread(params);
+            const response = await this.resumeThread(params, workspaceRoots, thread);
             resumed = true;
             if (!unloaded) {
                 throw RequestError.invalidParams(
@@ -973,7 +1066,7 @@ export class CodexAcpClient {
             return response;
         } catch (error) {
             if (detached && !resumed) {
-                await this.resumeThread({threadId: request.sessionId, excludeTurns: true}).catch(restoreError => {
+                await this.resumeThread({threadId: request.sessionId, excludeTurns: true}, workspaceRoots, thread).catch(restoreError => {
                     logger.error(`Failed to restore session ${request.sessionId} after an instruction update`, restoreError);
                 });
             }

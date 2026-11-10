@@ -7,9 +7,18 @@ import type {
 } from "./app-server/v2";
 import type {SessionConfigOption, SessionMode, SessionModeState} from "@agentclientprotocol/sdk/unstable";
 import {AIR_KIND_KEY, airOnlyMeta} from "./AirExtension";
+import {isDeepStrictEqual} from "node:util";
 
 export const MODE_CONFIG_ID = "mode";
 const PERMISSION_PROFILE_MODE_PREFIX = "permission-profile:";
+const SESSION_POLICY_MODE_ID = "session-policy";
+
+/** The legacy sandbox each built-in native permission profile is equal to. */
+const BUILT_IN_PROFILE_SANDBOX_MODES: Record<string, SandboxMode | undefined> = {
+    ":read-only": "read-only",
+    ":workspace": "workspace-write",
+    ":danger-full-access": "danger-full-access",
+};
 
 type AgentModeKind = "plan" | "auto_review" | "standard" | "full_access";
 
@@ -188,6 +197,40 @@ export class AgentMode {
     static find(modeId: string, availableModes: AgentMode[] = AgentMode.all()): AgentMode | null {
         const match = availableModes.find(m => m.id === modeId);
         return match ?? null;
+    }
+
+    /**
+     * The mode a resumed session continues in, with the modes it offers.
+     *
+     * A session restored with a built-in permission profile keeps its exact restored
+     * approval settings: the equal preset when there is one, otherwise a mode of its
+     * own. Rounding to another preset could widen access or change who approves.
+     * Custom profiles keep the configured approval defaults, as for new sessions.
+     */
+    static forResumedSession(
+        availableModes: AgentMode[],
+        activePermissionProfileId: string | null,
+        resumedApproval: {approvalPolicy: AskForApproval, approvalsReviewer: ApprovalsReviewer} | undefined,
+    ): {agentMode: AgentMode, availableAgentModes: AgentMode[]} {
+        const sandboxMode = activePermissionProfileId === null ? undefined : BUILT_IN_PROFILE_SANDBOX_MODES[activePermissionProfileId];
+        if (resumedApproval === undefined || sandboxMode === undefined) {
+            return {agentMode: AgentMode.getInitialAgentMode(availableModes, activePermissionProfileId), availableAgentModes: availableModes};
+        }
+        const presets = availableModes.filter(mode => mode.permissionProfileId === null && mode.sandboxMode === sandboxMode);
+        const equal = presets.find(mode => isDeepStrictEqual(mode.approvalPolicy, resumedApproval.approvalPolicy)
+            && mode.approvalsReviewer === resumedApproval.approvalsReviewer);
+        if (equal) return {agentMode: equal, availableAgentModes: availableModes};
+        const sessionMode = new AgentMode(
+            SESSION_POLICY_MODE_ID,
+            "Session policy",
+            "Keeps the approval and sandbox settings this session was saved with.",
+            null,
+            resumedApproval.approvalPolicy,
+            resumedApproval.approvalsReviewer,
+            presets[0]?.sandboxPolicy ?? null,
+            sandboxMode,
+        );
+        return {agentMode: sessionMode, availableAgentModes: [...availableModes, sessionMode]};
     }
 
     static getInitialAgentMode(

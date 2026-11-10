@@ -14,9 +14,17 @@ When custom profiles exist, the config option groups entries under **Sandbox Mod
 
 ## Initial and restored modes
 
-New, loaded, resumed, and forked sessions select the active custom profile reported by Codex when that profile is available. Built-in or unavailable active profiles keep the adapter's default `agent` mode (Auto review).
+New, loaded, resumed, and forked sessions select the active custom profile reported by Codex when that profile is available. Unavailable active profiles keep the adapter's default `agent` mode (Auto review).
 
 `INITIAL_AGENT_MODE` overrides the active profile. Set it to an available mode ID, including `permission-profile:<profile-id>`. An unavailable override falls back to the default mode.
+
+## Restoring a session's own permissions
+
+The built-in modes send an unnamed sandbox policy. Native Codex resume discards a saved unnamed policy that grants read access to a concrete path, and every workspace policy has such paths because native protects `.git`, `.agents`, `.codex`, and `.aws`. The session would then reopen with the current config's sandbox, which can be broader than its own.
+
+Before resuming or loading a thread that is not loaded, the adapter reads the thread's native history for its latest settings. A saved policy equal to a built-in profile (`:read-only`, `:workspace`, or `:danger-full-access`) is resumed with that profile named in `thread/resume.permissions`, which restores the same rules. The session then continues in the preset with the same sandbox and the restored approval policy and reviewer, or in a **Session policy** mode with exactly those settings when no preset matches; `INITIAL_AGENT_MODE` does not apply to it. A saved named profile is left to native resume, and the resume fails if native reports a different profile, for example because the profile no longer exists. Any other saved policy fails with an error instead of being rounded to a preset. Damaged history fails the same way unless a later complete turn context follows the damage.
+
+Resume and load pass a model provider only when the adapter has one configured, because any provider stops native resume from restoring the session's saved model and reasoning effort.
 
 ## Applying permissions
 
