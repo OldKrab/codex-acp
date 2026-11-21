@@ -5,7 +5,7 @@
 - `src/` — ACP server implementation. Entry point: `src/index.ts`.
 - `src/__tests__/` — Vitest suite (behavior-focused tests around ACP/Codex events).
 - `src/app-server/` — generated Codex app-server API types (regenerate via `npm run generate-types`).
-- `dist/bin/` — release-ready single-file executables and `*.zip` archives.
+- `dist/bin/` — single-file executables and `*.zip` archives built by `npm run bundle:all` and `npm run package:all`.
 - `.github/workflows/ci.yml` — CI mirrors the local workflow: typecheck → tests → bundle.
 
 ## Coding Style & Naming Conventions
@@ -26,15 +26,12 @@
 
 ## Pull Requests
 
-- Squash merges use the PR title as the commit subject, and release-please parses it to compute the next version. Titles must be conventional commits using one of: `feat`, `fix`, `perf`, `revert`, `docs`, `style`, `chore`, `refactor`, `test`, `build`, `ci`. `conventional-prs.yml` rejects anything else.
-- The title also decides the release: `feat:` bumps the minor, `fix:`/`perf:`/`revert:` the patch, a `!` bumps the major, and `chore:`/`ci:`/`docs:` and friends do not release at all.
+- Squash merges use the PR title as the commit subject. Titles must be conventional commits using one of: `feat`, `fix`, `perf`, `revert`, `docs`, `style`, `chore`, `refactor`, `test`, `build`, `ci`. `conventional-prs.yml` rejects anything else.
 
-## Releasing
+## Delivery
 
-- Releases are fully automated by release-please. There is no manual release workflow, and the version is never chosen by hand — it follows from the commit history.
-- `npm run release:preflight` verifies it is safe to release and prints the PR number and version; then `gh pr merge <pr-number> --squash`.
-- The preflight is the guard-list as code; if it exits non-zero, follow what it prints rather than merging.
-- Full runbook, including how to recover a stalled release: [`docs/RELEASES.md`](docs/RELEASES.md).
+- There are no releases and nothing is published to npm. OpenAIDE embeds this fork from a git submodule: once a merge to `main` passes CI, `openaide-update.yml` asks OpenAIDE to move its submodule to that commit.
+- Full runbook, including how to recover a lost update and how upstream syncs work: [`docs/RELEASES.md`](docs/RELEASES.md).
 
 ## Docs
 
