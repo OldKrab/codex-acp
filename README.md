@@ -1,7 +1,5 @@
 # ACP adapter for Codex CLI
 
-[![npm version](https://img.shields.io/npm/v/%40openaide%2Fcodex-acp)](https://www.npmjs.com/package/@openaide/codex-acp)
-
 Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol](https://agentclientprotocol.com/) clients.
 
 `codex-acp` is a stdio ACP agent server. It starts the Codex App Server, translates ACP requests into Codex operations, and maps Codex events back into the client.
@@ -28,33 +26,23 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 
 ## Installation
 
-Run the published package directly:
+This is the OpenAIDE-maintained build of
+[`agentclientprotocol/codex-acp`](https://github.com/agentclientprotocol/codex-acp).
+It is not published to npm: OpenAIDE embeds it from this repository, and each
+merge to `main` that passes CI reaches OpenAIDE automatically (see
+[docs/RELEASES.md](docs/RELEASES.md)). Other ACP clients should use the upstream
+adapter. To run this build from a checkout:
 
 ```bash
-npx -y @openaide/codex-acp
+npm ci
+npm run build
+node dist/index.js
 ```
 
-Or install it globally:
+The adapter depends on a compatible `@openai/codex` package. Set `CODEX_PATH` only when you want the adapter to run a different Codex binary:
 
 ```bash
-npm install -g @openaide/codex-acp
-codex-acp --version
-```
-
-The npm package includes a compatible `@openai/codex` dependency. Set `CODEX_PATH` only when you want the adapter to run a different Codex binary:
-
-```bash
-CODEX_PATH=/path/to/codex npx -y @openaide/codex-acp
-```
-
-To try changes that have landed on `main` but are not released yet, install from the
-`preview` channel. Pushes to `main` trigger preview publishing without waiting
-for CI or release-please; release commits are excluded, and newer pushes can
-replace queued previews. See
-[docs/RELEASES.md](docs/RELEASES.md#preview-releases).
-
-```bash
-npx -y @agentclientprotocol/codex-acp@preview
+CODEX_PATH=/path/to/codex node dist/index.js
 ```
 
 ## Authentication

@@ -93,17 +93,18 @@ npm run package:all
 The daily `Upstream Sync` GitHub workflow also supports manual dispatch. It opens
 one PR per upstream release and refreshes an automation-owned branch against
 current main using an exact force-with-lease. It preserves the fork's package
-identity, independent version, changelog, and release machinery. Once a
+identity and version, its changelog and guides, and keeps upstream's npm release
+files deleted. Once a
 maintainer commits to the branch, automation preserves those edits. Closing a
 release's PR suppresses its recreation.
 
 Source or dependency conflicts produce a draft PR with GitHub-visible conflicts
 instead of preventing PR creation. That draft can initially point at the raw
-upstream release; resolve it against main and retain fork-owned package and
-release files before marking ready. The preparation script reports start and
-terminal events and exits with status 2 for conflicts, 1 for other failures.
-Review the release impact and conventional PR title before merging: the default
-`chore:` sync title does not trigger an npm release.
+upstream release; resolve it against main, retain the fork-owned package fields
+and files, and delete upstream's release-please and publish files before marking
+ready. The preparation script reports start and terminal events and exits with
+status 2 for conflicts, 1 for other failures. Review the product impact before
+merging; once merged and green on main, the update reaches OpenAIDE automatically.
 
 ### Test suites
 
